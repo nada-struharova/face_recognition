@@ -3,44 +3,80 @@ import cv2
 import numpy as np
 import utils
 
-def get_region(image, center, size=20):
-    """ Extract a square region around a given center in an image. 
-        - segment face into regions around five facial landmarks (right eye, left eye, 
-          nose, right mouth corner, left mouth corner) 
-        - 5 landmarks provided from RetinaFace pre-trained face detection model 
-        - size=40 is arbitrary, adjust based on expected size of facial features """
+def get_region(image, center, size=20): # TODO: size 20 is arbitrary, can adjust
+    """ Extract a square region around a given facial landmark. """
+
     x, y = int(center[0]), int(center[1])
     x1, y1, x2, y2 = x - size, y - size, x + size, y + size
     if x1 < 0 or y1 < 0 or x2 > image.shape[1] or y2 > image.shape[0]:
         return None  # Region is out of image bounds
     return image[y1:y2, x1:x2]
 
-def extract_surf_features(image, hessianThreshold=400):
-    """ Extract SURF features from an face region. """
+def sift_features(image_region):
+    """Extract SIFT features from an image region.
+    Args:
+        image_region: A grayscale image region
+
+    Returns:
+        Numpy array containing flattened SIFT features. 
+    """
+
+    sift = cv2.SIFT_create()
+    keypoints, descriptors = sift.detectAndCompute(image_region, None)
+
+    if descriptors is None:  # Handle exceptions
+        descriptors = np.zeros((1, 128), dtype=np.float32)  # Default SIFT descriptor size
+
+    return descriptors.flatten()  # Flatten for concatenation 
+
+def surf_features(image, hessianThreshold=400):
+    """ Extract SURF features from an face region.
+    Args:
+        image_region: A grayscale image region
+
+    Returns:
+        Numpy array containing flattened SURF features.
+    """
+
     surf = cv2.xfeatures2d.SURF_create(hessianThreshold=hessianThreshold)
     _, descriptors = surf.detectAndCompute(image, None)
-    if descriptors is None:
-        descriptors = np.zeros((1, surf.descriptorSize()), dtype=np.float32)
-    return descriptors.flatten()
 
-def extract_hog_features(image, win=(64, 64), block=(16,16), stride=(8,8), cell=(8,8), bins=9):
-    """ Extract HOG features from an face region. """
+    if descriptors is None: # Handle exceptions
+        descriptors = np.zeros((1, surf.descriptorSize()), dtype=np.float32)
+
+    return descriptors.flatten() # Flatten for concatenation 
+
+def hog_features(image, win=(64, 64), block=(16,16), stride=(8,8), cell=(8,8), bins=9):
+    """ Extract HOG features from an face region.
+    Args:
+        image_region: A grayscale image region
+
+    Returns:
+        Numpy array containing flattened SURF features.
+    """
     hog = cv2.HOGDescriptor(win, block, stride, cell, bins)
     hog_features = hog.compute(image)
-    return hog_features.flatten()
+    return hog_features.flatten() # Flatten for concatenation 
 
-def extract_features(region):
+def region_local_features(region, sift=True, surf=True, hog=True, normalise=True):
+    """ Extract local features of region and concatenate. """
     features = []
 
-    surf_features = extract_surf_features(region)
-    hog_features = extract_hog_features(region)
+    if sift:
+        sift_features = sift_features(region) 
+        features.append(sift_features)
+    if surf:
+        surf_features = surf_features(region)
+        features.append(surf_features)
+    if hog:
+        hog_features = hog_features(region)
+        features.append(hog_features)
 
-    # normalise features
-    surf_norm = utils.normalise_features(surf_features)
-    hog_norm = utils.normalise_features(hog_features)
+    if normalise:
+        for i in range(len(features)):
+            features[i] /= np.linalg.norm(features[i], ord=2)  
 
-    # concatenate local features extracted from regions (for per-face descriptor)
-    features.append(np.concatenate((surf_norm, hog_norm)))    
+    return np.concatenate(features)
 
 def concatenate_features(features_dict):
     """ Concatenate features from all regions to form a complete face descriptor. """
@@ -56,16 +92,19 @@ def adjust_weights_based_on_reliability(features, reliability_scores):
     weighted_features = [feat * score for feat, score in zip(features, reliability_scores)]
     return sum(weighted_features)
 
-def process_face(gray_img, landmarks):
+def extract_local_features(gray_img, landmarks, sift=True, surf=True, hog=True, normalise=True):
+    """ Extract all wanted local features. """
     features = []
 
     for landmark_name, position in landmarks.items():
-        region = get_region(gray_img, position, size=40)
+        region = get_region(gray_img, position)
 
         if region is None or region.size == 0:
             continue
         
-        features = extract_features(region)
+        # TODO: change args to experiment with different local features extracted
+        region_features = region_local_features(region, sift, surf, hog, normalise)
+        features.append(region_features)
 
     # Aggregate features from all regions
     if features:
@@ -95,5 +134,5 @@ faces_data = {
 }
 
 for face_id, face_info in faces_data.items():
-    local_feature_descriptor = process_face(gray_img, face_info['landmarks'])
+    local_feature_descriptor = extract_local_features(gray_img, face_info['landmarks'])
     print(f"Features for {face_id}: {local_feature_descriptor}")

@@ -4,6 +4,48 @@ import cv2
 import numpy as np
 import utils
 
+def extract_sift_features(image, keypoints, radius=15):
+    """ Extract SIFT features from an face region. """
+    sift = cv2.SIFT_create()
+    regions = [cv2.KeyPoint(x=keypoint[0], y=keypoint[1], _size=radius*2) for keypoint in keypoints]
+    _, descriptors = sift.compute(image, regions)
+    return descriptors
+
+def extract_surf_features(image, keypoints, radius=15, hessianThreshold=400):
+    """ Extract SURF features from 68 landmarks. """
+    surf = cv2.xfeatures2d.SURF_create(hessianThreshold)
+    keypoint_regions = [cv2.KeyPoint(x=keypoint[0], y=keypoint[1], _size=radius*2) for keypoint in keypoints]
+    _, descriptors = surf.compute(image, keypoint_regions)
+    return descriptors
+
+def extract_hog_features(image, keypoints, radius=15,
+                         cells_per_block=(2, 2), pixels_per_cell=(16, 16)):
+    """ Extract HOG features from 68 landmarks. """
+    hog_descriptors = []
+    for keypoint in keypoints:
+        x, y = int(keypoint[0]), int(keypoint[1])
+        patch = image[y-radius:y+radius, x-radius:x+radius]
+        if patch.shape[0] == 2*radius and patch.shape[1] == 2*radius:
+            descriptor = cv2.HOGDescriptor(_winSize=(patch.shape[1], patch.shape[0]),
+                                           _blockSize=(2*pixels_per_cell[0], 2*pixels_per_cell[1]),
+                                           _blockStride=(pixels_per_cell[0], pixels_per_cell[1]),
+                                           _cellSize=(pixels_per_cell[0], pixels_per_cell[1]),
+                                           _nbins=9)
+            hog_descriptors.append(descriptor.compute(patch))
+    return np.array(hog_descriptors).squeeze()
+
+def extract_gabor_features(image, keypoints, frequency=0.6, radius=15):
+    """ Extract Gabor features from 68 landmarks. """
+    gabor_descriptors = []
+    image = img_as_float(image)
+    for keypoint in keypoints:
+        x, y = int(keypoint[0]), int(keypoint[1])
+        patch = image[y-radius:y+radius, x-radius:x+radius]
+        if patch.shape[0] == 2*radius and patch.shape[1] == 2*radius:
+            filt_real, filt_imag = gabor(patch, frequency=frequency)
+            gabor_descriptors.append(filt_real.flatten())
+    return np.array(gabor_descriptors)
+
 def define_rois(image, landmarks, feature_extractor):
     """ Define ROIs from 68-point landmark model. """
     regions = {
@@ -30,48 +72,6 @@ def define_rois(image, landmarks, feature_extractor):
         features[key] = (keypoints, descriptors)
     
     return features
-
-# SIFT features
-def extract_sift_features(image, keypoints, radius=15):
-    sift = cv2.SIFT_create()
-    regions = [cv2.KeyPoint(x=keypoint[0], y=keypoint[1], _size=radius*2) for keypoint in keypoints]
-    _, descriptors = sift.compute(image, regions)
-    return descriptors
-
-# SURF features (faster for real-time applications without sacrificing too much)
-def extract_surf_features(image, keypoints, radius=15, hessianThreshold=400):
-    """ Extract SURF features from 68 landmarks. """
-    surf = cv2.xfeatures2d.SURF_create(hessianThreshold)
-    keypoint_regions = [cv2.KeyPoint(x=keypoint[0], y=keypoint[1], _size=radius*2) for keypoint in keypoints]
-    _, descriptors = surf.compute(image, keypoint_regions)
-    return descriptors
-
-def extract_hog_features(image, keypoints, radius=15, cells_per_block=(2, 2), pixels_per_cell=(16, 16)):
-    """ Extract HOG features from 68 landmarks. """
-    hog_descriptors = []
-    for keypoint in keypoints:
-        x, y = int(keypoint[0]), int(keypoint[1])
-        patch = image[y-radius:y+radius, x-radius:x+radius]
-        if patch.shape[0] == 2*radius and patch.shape[1] == 2*radius:
-            descriptor = cv2.HOGDescriptor(_winSize=(patch.shape[1], patch.shape[0]),
-                                           _blockSize=(2*pixels_per_cell[0], 2*pixels_per_cell[1]),
-                                           _blockStride=(pixels_per_cell[0], pixels_per_cell[1]),
-                                           _cellSize=(pixels_per_cell[0], pixels_per_cell[1]),
-                                           _nbins=9)
-            hog_descriptors.append(descriptor.compute(patch))
-    return np.array(hog_descriptors).squeeze()
-
-def extract_gabor_features(image, keypoints, frequency=0.6, radius=15):
-    """ Extract Gabor features from 68 landmarks. """
-    gabor_descriptors = []
-    image = img_as_float(image)
-    for keypoint in keypoints:
-        x, y = int(keypoint[0]), int(keypoint[1])
-        patch = image[y-radius:y+radius, x-radius:x+radius]
-        if patch.shape[0] == 2*radius and patch.shape[1] == 2*radius:
-            filt_real, filt_imag = gabor(patch, frequency=frequency)
-            gabor_descriptors.append(filt_real.flatten())
-    return np.array(gabor_descriptors)
 
 # Load image and convert to grayscale
 input_image = io.imread('../test/assets/aflw-test.jpg')
