@@ -1,14 +1,9 @@
 import cv2
 import numpy as np
-import os
-import tensorflow as tf
-from keras.preprocessing.image import img_to_array, load_img
-from keras.applications.resnet50 import preprocess_input
 import random
-import matplotlib.pyplot as plt
 
 def occlude_rectangle(image, severity=0.3):
-    """Adds a rectangle occlusion to the image.
+    """ Adds a rectangle occlusion to the image.
     Args:
         image: Input image as a NumPy array (OpenCV format).
         severity: Float between 0.0 and 1.0. Controls size of occlusion.
@@ -27,7 +22,7 @@ def occlude_rectangle(image, severity=0.3):
     return image
 
 def occlude_ellipse(image, severity=0.2):
-    """Adds an elliptical occlusion to the image.
+    """ Adds an elliptical occlusion to the image.
     Args:
         image: Input image as a NumPy array (OpenCV format).
         severity: Float between 0.0 and 1.0. Controls size of occlusion.
@@ -53,6 +48,8 @@ def occlude_ellipse(image, severity=0.2):
     return occluded_image
 
 def occlude_eyes(image):
+    """ Adds a rectangle occlusion over the eyes in the image to simulate sunglasses. 
+    """
     h, w, _ = image.shape
     # Adding a horizontal bar across the eyes
     y_start, y_end = int(h * 0.3), int(h * 0.4)
@@ -68,55 +65,55 @@ def add_occlusion(image, occlusion_probability=1.0):
             return occlude_ellipse(image)
 
 
-def load_and_preprocess_image(image_path, target_size=(224, 224), apply_occlusion=False, occlusion_probability=1.0):
-    # Load image
-    image = load_img(image_path, target_size=target_size)
-    image = img_to_array(image)
+# def load_and_preprocess_image(image_path, target_size=(224, 224), apply_occlusion=False, occlusion_probability=1.0):
+#     # Load image
+#     image = load_img(image_path, target_size=target_size)
+#     image = img_to_array(image)
 
-    # Optionally apply synthetic occlusion
-    if apply_occlusion:
-        image = add_occlusion(image, occlusion_probability=occlusion_probability)
+#     # Optionally apply synthetic occlusion
+#     if apply_occlusion:
+#         image = add_occlusion(image, occlusion_probability=occlusion_probability)
 
-    # Normalize image
-    image = preprocess_input(image)  # Use appropriate preprocessing based on the model you plan to use
-    return image
+#     # Normalize image
+#     image = preprocess_input(image)  # Use appropriate preprocessing based on the model you plan to use
+#     return image
 
-def load_dataset(directory, num_images=1000, occlusion_probability=1.0):
-    images = []
-    """ Apply occlusion to images from dataset. """
-    for img_file in os.listdir(directory)[:num_images]:
-        img_path = os.path.join(directory, img_file)
-        try:
-            img = load_and_preprocess_image(img_path, apply_occlusion=True, occlusion_probability=occlusion_probability)
-            images.append(img)
-        except Exception as e:
-            print(f"Failed to process image {img_file}: {e}")
-    return np.array(images)
+# def load_dataset(directory, num_images=1000, occlusion_probability=1.0):
+#     images = []
+#     """ Apply occlusion to images from dataset. """
+#     for img_file in os.listdir(directory)[:num_images]:
+#         img_path = os.path.join(directory, img_file)
+#         try:
+#             img = load_and_preprocess_image(img_path, apply_occlusion=True, occlusion_probability=occlusion_probability)
+#             images.append(img)
+#         except Exception as e:
+#             print(f"Failed to process image {img_file}: {e}")
+#     return np.array(images)
 
-def show_images(original, occluded):
-    """ Testing synthethic occlusion. """
-    plt.figure(figsize=(10, 5))
-    plt.subplot(121)
-    plt.imshow(cv2.cvtColor(original, cv2.COLOR_BGR2RGB))
-    plt.title('Original Image')
-    plt.axis('off')
+# def show_images(original, occluded):
+#     """ Testing synthethic occlusion. """
+#     plt.figure(figsize=(10, 5))
+#     plt.subplot(121)
+#     plt.imshow(cv2.cvtColor(original, cv2.COLOR_BGR2RGB))
+#     plt.title('Original Image')
+#     plt.axis('off')
 
-    plt.subplot(122)
-    plt.imshow(cv2.cvtColor(occluded, cv2.COLOR_BGR2RGB))
-    plt.title('Occluded Image')
-    plt.axis('off')
-    plt.show()
+#     plt.subplot(122)
+#     plt.imshow(cv2.cvtColor(occluded, cv2.COLOR_BGR2RGB))
+#     plt.title('Occluded Image')
+#     plt.axis('off')
+#     plt.show()
 
 ### TESTING ###
-# Load an image (update the path to your image file)
-image_path = 'face-alignment/test/assets/aflw-test.jpg'
-image = cv2.imread(image_path)
+# # Load an image (update the path to your image file)
+# image_path = 'face-alignment/test/assets/aflw-test.jpg'
+# image = cv2.imread(image_path)
 
-# Augment with occlusions
-occluded_with_rectangle = occlude_rectangle(image)
-occluded_with_ellipse = occlude_ellipse(image)
+# # Augment with occlusions
+# occluded_with_rectangle = occlude_rectangle(image)
+# occluded_with_ellipse = occlude_ellipse(image)
 
-# Display images
-show_images(image, occluded_with_rectangle)
-show_images(image, occluded_with_ellipse)
+# # Display images
+# show_images(image, occluded_with_rectangle)
+# show_images(image, occluded_with_ellipse)
 
