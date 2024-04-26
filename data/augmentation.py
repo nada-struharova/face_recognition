@@ -5,10 +5,13 @@ import random
 def occlude_rectangle(image, severity=0.3):
     """ Adds a rectangle occlusion to the image.
     Args:
-        image: Input image as a NumPy array (OpenCV format).
+        image: Input image. Can be either RGB or grayscale.
         severity: Float between 0.0 and 1.0. Controls size of occlusion.
     """
-    height, width = image.shape[:2]
+    if len(image.shape) == 2:  # Check for grayscale
+        image = np.stack((image,) * 3, axis=-1)  # Convert to RGB
+
+    height, width, _ = image.shape  # Unpack with _ to ignore channels
 
     # Generate
     occ_width = int(width * severity)
@@ -24,10 +27,13 @@ def occlude_rectangle(image, severity=0.3):
 def occlude_ellipse(image, severity=0.2):
     """ Adds an elliptical occlusion to the image.
     Args:
-        image: Input image as a NumPy array (OpenCV format).
+        image: Input image. Can be either RGB or grayscale.
         severity: Float between 0.0 and 1.0. Controls size of occlusion.
     """
-    height, width = image.shape[:2]
+    if len(image.shape) == 2:  # Check for grayscale
+        image = np.stack((image,) * 3, axis=-1)  # Convert to RGB
+
+    height, width, _ = image.shape
 
     # Random parameters based on severity
     center_x = np.random.randint(0, width)
@@ -56,13 +62,17 @@ def occlude_eyes(image):
     image[y_start:y_end, :, :] = 0  # Black bar
     return image
 
-def add_occlusion(image, occlusion_probability=1.0):
+def add_occlusion(image, ):
     """ Add either a rectangle or ellipse occlusion randomly. """
-    if random.random() < occlusion_probability:
-        if random.random() > 0.5:
-            return occlude_rectangle(image)
-        else:
-            return occlude_ellipse(image)
+    if np.random.random() > 0.5:
+        return occlude_rectangle(image)
+    else:
+        return occlude_ellipse(image)
+    
+# Augmentation with Synthetic Occlusion (using augmentation.py)
+def augment_with_occlusion(image, label):
+    image = add_occlusion(image)  # Augment the image
+    return image, label
 
 
 # def load_and_preprocess_image(image_path, target_size=(224, 224), apply_occlusion=False, occlusion_probability=1.0):
