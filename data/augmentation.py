@@ -16,7 +16,7 @@ def occlude_eyes(image):
     image[y_start:y_end, :, :] = 0  # Black bar
     return image
     
-def occlude_rectangle(image, min_coverage=0.05, max_coverage=0.2, use_colour=False):
+def occlude_rectangle(image, min_coverage=0.05, max_coverage=0.1, use_colour=False):
     """ Add a rectangle occlusion to original image.
     
     Args:
@@ -30,8 +30,15 @@ def occlude_rectangle(image, min_coverage=0.05, max_coverage=0.2, use_colour=Fal
     """
 
     # Get image dimensions (Image Shape = (batch_size, 224, 224, 3))
-    _, height, width, channels = image.shape
-    area = height * width
+    # if len(image.shape) == 3:
+    #     height, width, channels = image.shape
+    # else:
+    #     _, height, width, channels = image.shape
+    # area = height * width
+
+    height = 224
+    width = 224
+    channels = 3
     
     # Occlusion coverage and dimensions
     coverage = tf.random.uniform([], min_coverage, max_coverage)
@@ -59,7 +66,7 @@ def occlude_rectangle(image, min_coverage=0.05, max_coverage=0.2, use_colour=Fal
     
     return tf.where(mask == 1, colour, image)
 
-def occlude_ellipse(image, min_coverage=0.05, max_coverage=0.2, use_colour=False):
+def occlude_ellipse(image, min_coverage=0.05, max_coverage=0.1, use_colour=False):
     """ Add occlusions of various shapes to the image.
     
     Args:
@@ -71,9 +78,15 @@ def occlude_ellipse(image, min_coverage=0.05, max_coverage=0.2, use_colour=False
     Returns:
         tf.Tensor: The occluded image.
     """
-
     # Image dimensions
-    _, height, width, _ = image.shape
+    # if len(image.shape) == 3:
+    #     height, width, _ = image.shape
+    # else:
+    #     _, height, width, _ = image.shape
+
+    height = 224
+    width = 224
+    channels = 3
 
     coverage = tf.random.uniform([], min_coverage, max_coverage)
     area = height * width

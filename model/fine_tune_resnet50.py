@@ -13,19 +13,13 @@ for layer in base_model.layers[:-4]:  # Fine-tune last few layers
     layer.trainable = False
 
 # Add custom layers on top of pre-trained model
-""" 1st approach"""
 x = base_model.output
-x = tf.keras.layers.Flatten()(x)  # Flatten for dense layers 
-predictions = Dense(10, activation='softmax')(x)  # Adjust '10' to number of classes in dataset
-
-""" 2nd approach """
-# x = base_model.output
-# x = GlobalAveragePooling2D()(x)
-# x = Dense(1024, activation='relu')(x) 
-# predictions = Dense(10, activation='softmax')(x)
+x = GlobalAveragePooling2D()(x)
+x = Dense(1024, activation='relu')(x) 
+output = Dense(10, activation='softmax')(x)
 
 # This is the model we will train
-model = Model(inputs=base_model.input, outputs=predictions)
+model = Model(inputs=base_model.input, outputs=output)
 
 # Compile the model
 model.compile(optimizer=Adam(learning_rate=1e-4),
@@ -45,8 +39,8 @@ train_data_generator = ImageDataGenerator(
 test_data_generator = ImageDataGenerator(rescale=1./255)
 
 # Update paths for augmented dataset
-train_dataset_path = '/path/to/train/dataset'
-validation_dataset_path = '/path/to/validation/dataset'
+train_dataset_path = 'datasets/celeb_a/train'
+validation_dataset_path = 'datasets/celeb_a/validation'
 
 train_generator = train_data_generator.flow_from_directory(
     train_dataset_path,

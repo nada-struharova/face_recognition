@@ -1,16 +1,15 @@
 import tensorflow as tf
 from keras import Model
-from keras.layers import Flatten, Dense, Input
+from keras.layers import Flatten, Dense
 from keras_vggface.vggface import VGGFace
 from keras.preprocessing.image import ImageDataGenerator
 from keras.optimizers import Adam
-from keras.callbacks import ModelCheckpoint, EarlyStopping
 
 # Custom parameters
 nb_class = 2
 hidden_dim = 512
 batch_size = 32
-epochs = 10
+epochs = 15
 
 # Model architecture
 vgg_model = VGGFace(include_top=False, input_shape=(224, 224, 3))
@@ -26,11 +25,13 @@ for layer in custom_vgg_model.layers[:-3]:
     layer.trainable = False
 
 # Compile the model
-custom_vgg_model.compile(optimizer=Adam(lr=0.0001), loss='categorical_crossentropy', metrics=['accuracy'])
+custom_vgg_model.compile(optimizer=Adam(lr=0.0001),
+                         loss='categorical_crossentropy',
+                         metrics=['accuracy'])
 
 # Prepare data augmentation configuration
-train_data_dir = 'dataset/train'
-validation_data_dir = 'dataset/validation'
+train_data_dir = 'datasets/celeb_a/train'
+validation_data_dir = 'dataset/celeb_a/validation'
 
 train_datagen = ImageDataGenerator(
     rescale=1./255,
@@ -54,6 +55,3 @@ validation_generator = test_datagen.flow_from_directory(
     batch_size=batch_size,
     class_mode='categorical'
 )
-
-# Fit the model
-checkpointer = ModelCheckpoint(filepath

@@ -110,15 +110,6 @@ global_features = extract_global_features(image)
 
 print(global_features.shape)  # Check the shape of the extracted features
 
-# --- Main Logic ---
-# def main():
-#     captured_image_path = capture_image()
-#     global_features = extract_global_features(captured_image_path)
-#     print("Extracted Global Features:", global_features)
-
-# if __name__ == '__main__':
-#     main()
-
 # Main execution
 model = load_finetuned_model()
 detections = [{'box': [100, 100, 50, 50], 'confidence': 0.9}, {'box': [200, 200, 50, 50], 'confidence': 0.92}]
