@@ -7,9 +7,10 @@ from retinaface import RetinaFace
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.metrics import roc_curve, auc
 from skimage.feature import local_binary_pattern
+from scipy import spatial
 
 # ------------------ Utilities ------------------ 
-def split_into_grid(image, grid_size=(3, 3)):
+def split_into_grid(image, grid_size=(2, 2)):
    height, width = image.shape[:2]
    grid_rows, grid_cols = grid_size
    row_size = height // grid_rows
@@ -109,9 +110,9 @@ def normalise_image(image, output_size):
     resized_img = cv2.resize(gray_img, output_size, interpolation=cv2.INTER_LINEAR)
     
     # Normalize the pixel values to the range [0, 1]
-    normalised_img = resized_img.astype(np.float32) / 255.0
+    # normalised_img = resized_img.astype(np.float32) / 255.0
     
-    return normalised_img
+    return resized_img
 
 def visualize_preprocessed_face(image, landmarks):
     """
@@ -254,12 +255,15 @@ def preprocess_face(image, face_data):
     # Crop the image
     x_offset = max(0, left - margin_x)  # Actual shift in x-coordinate
     y_offset = max(0, top - margin_y)  # Actual shift in y-coordinate
+    # face_img = image[max(0, top - margin_y):min(image.shape[0], bottom + margin_y), 
+    #                 max(0, left - margin_x):min(image.shape[1], right + margin_x)]
     face_img = image[y_offset:min(image.shape[0], bottom + margin_y), 
                     x_offset:min(image.shape[1], right + margin_x)]
 
     # Update landmarks after cropping
     new_landmarks = {}
     for landmark_name, (x, y) in landmarks.items():
+        # new_landmarks[landmark_name] = (x - (left - margin_x), y - (top - margin_y))
         new_landmarks[landmark_name] = (x - x_offset, y - y_offset)
 
     # Alignment based on eyes
@@ -305,21 +309,6 @@ def preprocess_face(image, face_data):
 
     return normalised_img, new_landmarks
 
-    # face_img = image[max(0, top - margin_y):min(image.shape[0], bottom + margin_y), 
-    #                 max(0, left - margin_x):min(image.shape[1], right + margin_x)]
-
-    # # Update landmarks after cropping
-    # new_landmarks = {}
-    # for landmark_name, (x, y) in landmarks.items():
-    #     new_landmarks[landmark_name] = (x - (left - margin_x), y - (top - margin_y)
-    
-    # Update landmarks after rotation    
-    # new_landmarks = {}
-    # for landmark_name, (x, y) in landmarks.items():
-    #     original_pos = np.array([x, y, 1])  # Add homogeneous coordinate
-    #     new_pos = rotation_matrix.dot(original_pos)
-    #     new_landmarks[landmark_name] = new_pos[:2].astype(int)
-
 def set_region(image, center, size=20):
     """ Extract a square region around a given facial landmark.
     Args:
@@ -343,7 +332,7 @@ def set_region(image, center, size=20):
     print(f"Extracted Region Size: {region.shape}")  # Show actual extracted size
     return region
 
-def get_region_features(region, sift=True, surf=False, hog=False, lbp=True):
+def get_region_features(region, sift=True, surf=False, hog=False, lbp=False):
     """ Extract local features of region.
     Args:
         region: Specific regions for local feature extraction.
@@ -360,7 +349,8 @@ def get_region_features(region, sift=True, surf=False, hog=False, lbp=True):
         sift_feat = extract_sift_features(region)
         if not isinstance(sift_feat, np.ndarray):
             sift_feat = np.array(sift_feat)  # Convert to np array
-        features = np.concatenate([features, sift_feat])  # Concatenate NumPy arrays
+        # TODO: fix
+        features = sift_feat  # Concatenate NumPy arrays
     if surf:
         surf_feat= extract_surf_features(region)
         if not isinstance(surf_feat, np.ndarray):
@@ -400,7 +390,7 @@ def extract_features(image, faces_data):
 
     return features
 
-def extract_from(image):
+def extract_local_features(image):
     """ Extracts local features using RetinaFace. 
     
     Args:
@@ -409,75 +399,40 @@ def extract_from(image):
     Returns:
         Face data (landmarks, bounding box, features, etc.) on all detected faces. """
     
-    # Detect all faces, face data (landmarks, facial area) in image
+    # Detect faces and face data (landmarks, facial area) in given image
     faces = RetinaFace.detect_faces(image)  
 
     # Each face: preprocess -> extract local features -> store
-    faces_features = {}  
+    faces_features = {}
     for face_id, face_data in faces.items():
-        face_img, landmarks = preprocess_face(image, face_data)      
+        face_img, landmarks = preprocess_face(image, face_data)   
 
         # Extract and store local features
-        region_features = extract_local_feats(face_img, face_data['facial_area'], landmarks)
-        faces_features.setdefault(face_id, []).append(region_features)  
+        face_features = fuse_regions(face_img, face_data['facial_area'], landmarks)
+        faces_features.setdefault(face_id, []).append(face_features)  
 
     # Return all faces with per-face extracted features
     return faces_features
 
 # ------------------ Extracton ------------------ 
-def extract_local_features(gray_img, landmarks, sift=True, surf=False, hog=True, lbp=True, region_norm=False):
+def fuse_regions(image, facial_area, landmarks, sift=True, surf=False, hog=False, lbp=False, region_norm=False):
     """ Extract all wanted local features. """
-    # Adaptive region size -> Sets region size based on avg landmark distance
-    left_eye_x, left_eye_y = landmarks['left_eye']
-    right_eye_x, right_eye_y = landmarks['right_eye']
-    distance = np.sqrt(((right_eye_x - left_eye_x) ** 2) + ((right_eye_y - left_eye_y) ** 2)) 
-    region_size = int(0.6 * distance)
 
-    features = np.array([])
-    for landmark_name, position in landmarks.items():
-        # Set region
-        region = set_region(gray_img, position, size=region_size)
+    # Split into regions (grid-based or landmark-centric)
+    regions = split_into_grid(image)
+    fused_features = np.array([])
 
+    # TODO: using split_into_regions_landmarks use "for region, landmark in regions"
+    for region in regions:
+        print(region.shape)
         # Error handling
-        if region is None or region.size == 0:
-            print("Error: Empty region for landmark:", landmark_name, position)
-            continue
-
-        print("Landmark:", landmark_name, "Region Size:", region.size) # Debugging
-
-        # Extract Local Features
-        region_features = get_region_features(region, sift, surf, hog, lbp)
-        print("Region features: ", region_features)
-
-        # Individual normalisation
-        if region_norm:
-            for i in range(len(region_features)):
-                region_features[i] /= np.linalg.norm(region_features[i], ord=2) 
-        
-        # Concatenate directly
-        if features.size == 0:
-            features = region_features
-        else:
-            features = np.concatenate([features, region_features]) 
-
-    # Global Normalization
-    if not region_norm:
-        features /= np.linalg.norm(features, ord=2) 
-
-    return features
-
-def extract_local_feats(gray_img, facial_area, landmarks, sift=True, surf=False, hog=False, lbp=True, region_norm=False):
-    """ Extract all wanted local features. """
-
-    regions = split_into_landmark_regions(gray_img, facial_area, landmarks)
-    features = np.array([])
-
-    for region, landmark in regions:
-        # # Error handling
         if region is None or region.size == 0:
             print("Error: Empty region for landmark!")
             continue
 
+        if region.dtype != np.uint8:
+            region = region.astype(np.uint8) 
+
         # Extract Local Features
         region_features = get_region_features(region, sift, surf, hog, lbp)
         print("Region features: ", region_features)
@@ -485,28 +440,21 @@ def extract_local_feats(gray_img, facial_area, landmarks, sift=True, surf=False,
         # Individual normalisation
         if region_norm:
             for i in range(len(region_features)):
+                # TODO: check logic, have to normalise each [i]??
                 region_features[i] /= np.linalg.norm(region_features[i], ord=2) 
         
         # Concatenate directly
-        if features.size == 0:
-            features = region_features
+        if fused_features.size == 0:
+            fused_features = region_features
         else:
-            features = np.concatenate([features, region_features]) 
+            fused_features = np.concatenate([fused_features, region_features]) 
 
     # Global Normalization
     if not region_norm:
-        features /= np.linalg.norm(features, ord=2) 
+        fused_features /= np.linalg.norm(fused_features, ord=2) 
 
-    print("Total descriptor size after concatenation:", features.shape)
-    return features
-
-def extract_features_from_regions(regions, sift=True, surf=False, hog=True, lbp=True):
-    all_features = []
-    for region in regions:
-        # Your code to extract SIFT, HOG, LBP features from a single region
-        region_features = get_region_features(region, sift, surf, hog, lbp)
-        all_features.append(region_features)
-    return all_features
+    print("Total descriptor size after concatenation:", fused_features.shape)
+    return fused_features
 
 # ------------------ Dynamic Weighting Scheme ------------------ 
 def adjust_weights_based_on_reliability(features, reliability_scores):
@@ -516,24 +464,41 @@ def adjust_weights_based_on_reliability(features, reliability_scores):
     return sum(weighted_features)
 
 # ------------------ Validation ------------------ 
+# def calculate_l2_dist(features_dict): 
+#     """Calculates pairwise L2 distances between feature descriptors.
+#     """
+#     distances = {'intra_distances': [], 'inter_distances': []}
+
+#     for identity1, features1 in features_dict.items():
+#         for identity2, features2 in features_dict.items():
+#             if identity1 == identity2:  
+#                 dists = euclidean_distances(features1, features1) 
+#                 # Extract distances below diagonal (excluding self-comparisons)
+#                 for i in range(1, len(features1)):  
+#                     for j in range(i): 
+#                         distances['intra_distances'].append(dists[i][j]) 
+
+#             else:  
+#                 dists = euclidean_distances(features1, features2)
+#                 for dist in dists.flatten(): # Flatten to add all distances
+#                     distances['inter_distances'].append(dist)
+
+#     return distances
+
 def calculate_l2_dist(features_dict): 
-    """Calculates pairwise L2 distances between feature descriptors.
-    """
     distances = {'intra_distances': [], 'inter_distances': []}
 
     for identity1, features1 in features_dict.items():
         for identity2, features2 in features_dict.items():
             if identity1 == identity2:  
-                dists = euclidean_distances(features1, features1) 
-                # Extract distances below diagonal (excluding self-comparisons)
-                for i in range(1, len(features1)):  
-                    for j in range(i): 
-                        distances['intra_distances'].append(dists[i][j]) 
+                dists = spatial.distance.cdist(features1, features1, metric='euclidean') 
+                # Extract distances below diagonal
+                dists = dists[np.tril_indices(dists.shape[0], k=-1)] 
+                distances['intra_distances'].extend(dists.flatten()) 
 
             else:  
-                dists = euclidean_distances(features1, features2)
-                for dist in dists.flatten(): # Flatten to add all distances
-                    distances['inter_distances'].append(dist)
+                dists = spatial.distance.cdist(features1, features2, metric='euclidean') 
+                distances['inter_distances'].extend(dists.flatten())
 
     return distances
 
@@ -612,7 +577,7 @@ def load_dataset(dataset_path):
             # Only process files, not directories or hidden files
             if os.path.isfile(image_path) and not image_filename.startswith('.'):
                 image = cv2.imread(image_path)
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 images.append(image)
                 identities.append(identity_dir)
 
@@ -620,38 +585,37 @@ def load_dataset(dataset_path):
 
 # ------------------ Testing logic ------------------ 
 # Dataset loading and feature extraction
-# images, identities = load_dataset("face_recognition/datasets/evaluate_local") 
-# features = {} 
+images, identities = load_dataset("face_recognition/datasets/evaluate_local") 
+features = {} 
 
-# for image, identity in zip(images, identities):
-#     if image is None:
-#         print("Image: ", image)
-#     print("ID: ", identity)
-#     feat_dict = extract_from(image)
-#     features.update(feat_dict) 
+for image, identity in zip(images, identities):
+    if image is None:
+        print("Image: ", image)
+    print("ID: ", identity)
+    feat_dict = extract_local_features(image)
+    features.update(feat_dict) 
 
-# # Feature intra- and inter- distance
-# final_distances = calculate_l2_dist(features)
+# Feature intra- and inter- distance
+final_distances = calculate_l2_dist(features)
 
-# # ------------------ Analysis & Visualisation ------------------ 
+# ------------------ Analysis & Visualisation ------------------ 
 
-# # Metrics and Distribution Analysis
-# analyze_features(final_distances)
+# Metrics and Distribution Analysis
+analyze_features(final_distances)
 
-# # Histograms of inter- and intra- distances
-# histograms(final_distances)
+# Histograms of inter- and intra- distances
+histograms(final_distances)
 
-image = cv2.imread('face_recognition/datasets/evaluate_local/Nada/025.jpeg')  
-faces = RetinaFace.detect_faces(image)  
+# ------------------ Visualise Preprocessing ------------------ 
+# image = cv2.imread('face_recognition/datasets/evaluate_local/Nada/025.jpeg')  
+# faces = RetinaFace.detect_faces(image)  
 
-for face_id, face_data in faces.items():
-    face_img, resized_landmarks = preprocess_face(image.copy(), face_data)
+# for face_id, face_data in faces.items():
+#     face_img, resized_landmarks = preprocess_face(image.copy(), face_data)
 
-    print("Original Image Shape: ", image.shape)
-    print("Original landmarks: ", face_data['landmarks'])
-    print("Resized Image Shape: ", face_img.shape)
-    for landmark_name, (x, y) in resized_landmarks.items():
-        print(f"New Landmark: {landmark_name}, Position: ({x}, {y})")  
+#     print("Resized Image Shape: ", face_img.shape)
+#     for landmark_name, (x, y) in resized_landmarks.items():
+#         print(f"New Landmark: {landmark_name}, Position: ({x}, {y})")  
 
-    # Display the images with landmarks
-    visualize_preprocessed_face(face_img, resized_landmarks) 
+#     # Display the images with landmarks
+#     visualize_preprocessed_face(face_img, resized_landmarks) 
