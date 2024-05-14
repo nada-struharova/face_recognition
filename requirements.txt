@@ -1,0 +1,5 @@
+tensorflow
+tesnorflow_datasets
+tfds-nightly
+keras
+numpy
