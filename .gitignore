@@ -1,2 +1,15 @@
-datasets/evaluate_local
-datasets/lfw
+datasets/evaluate_local/
+datasets/lfw/
+datasets/celeb_a
+.DS_Store
+# *.tmp
+# *.temp
+# *.log
+# temp/
+# tmp/
+# .vscode/
+# *.pyc
+# __pycache__/
+# venv/
+# env/
+# myenv/
