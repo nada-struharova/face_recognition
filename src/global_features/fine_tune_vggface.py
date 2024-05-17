@@ -4,48 +4,7 @@ import pandas as pd
 import random
 import numpy as np
 import shutil
-
-def add_sunglasses_occlusion(image):
-    sunglasses_img = tf.io.read_file("path/to/sunglasses_image.jpg") 
-    sunglasses_img = tf.image.decode_jpeg(sunglasses_img, channels=3)
-
-    # Resize sunglasses image to match the target image dimensions
-    sunglasses_img = tf.image.resize(sunglasses_img, (image.shape[0], image.shape[1])) 
-
-    # Randomly position the sunglasses (adjusted for resized image)
-    x = random.randint(0, image.shape[1] - sunglasses_img.shape[1])
-    y = random.randint(0, image.shape[0] - sunglasses_img.shape[0])
-
-    # Crop the image to match the sunglasses image shape
-    image_cropped = tf.image.crop_to_bounding_box(image, y, x, sunglasses_img.shape[0], sunglasses_img.shape[1])
-
-    # Overlay sunglasses using alpha blending
-    alpha = tf.ones_like(sunglasses_img) * 0.8 
-    image_with_sunglasses = sunglasses_img * alpha + image_cropped * (1 - alpha)
-
-    # Paste the cropped image back into the original image
-    image = tf.image.pad_to_bounding_box(image_with_sunglasses, y, x, image.shape[0], image.shape[1])
-
-    return image
-
-def add_random_rectangle_occlusion(image):
-    """Adds a random rectangular occlusion to an image."""
-
-    batch_size = tf.shape(image)[0]  # Get the batch size
-    boxes = tf.TensorArray(tf.float32, size=batch_size)
-
-    for i in tf.range(batch_size):
-        height = random.randint(30, 80)
-        width = random.randint(50, 120)
-        x = random.randint(0, image.shape[1] - width)
-        y = random.randint(0, image.shape[0] - height)
-        boxes = boxes.write(i, [[y / image.shape[0], x / image.shape[1], (y + height) / image.shape[0], (x + width) / image.shape[1]]])
-
-    boxes = boxes.stack()  
-    boxes = tf.expand_dims(boxes, 1)  # Add a dimension for num_boxes 
-
-    image = tf.image.draw_bounding_boxes(image, boxes, tf.zeros([batch_size, 1, 3]))  # Black color for the boxes
-    return image
+import augmentation
 
 def prepare_celeba_dataset(
     base_img_dir,
@@ -101,8 +60,7 @@ def prepare_celeba_dataset(
     split_index = int(len(test_image_paths) * test_split_ratio)
     test_image_paths_original, test_image_paths_augmented = test_image_paths[:split_index], test_image_paths[split_index:]
     test_labels_original, test_labels_augmented = test_labels[:split_index], test_labels[split_index:]
-
-    # Create tf.data Datasets
+        
     def load_and_preprocess_image(file_path, label):
         image = tf.io.read_file(file_path)
         image = tf.image.decode_jpeg(image, channels=3)
@@ -129,7 +87,7 @@ def prepare_celeba_dataset(
 
         # Occlusions (with probability)
         if random.random() < 0.3:  # 30% chance of occlusion
-            occlusion_fn = random.choice([add_sunglasses_occlusion, add_random_rectangle_occlusion])
+            occlusion_fn = random.choice([augmentation.occlude_rectangle, augmentation.add_sunglasses_to_image])
             image = occlusion_fn(image)
 
         return image, label
@@ -216,3 +174,42 @@ augmented_test_loss, augmented_test_accuracy = model.evaluate(test_dataset_augme
 
 print("Original Test Accuracy:", original_test_accuracy)
 print("Augmented Test Accuracy:", augmented_test_accuracy)
+
+# Save the entire model
+model.save('face_recognition_model')  # Creates a directory with model structure and weights
+
+# Save just the weights (smaller file size)
+model.save_weights('face_recognition_model_weights.h5')  # Only saves the weights 
+
+# # Option 1: Load entire model
+# loaded_model = tf.keras.models.load_model('face_recognition_model')
+
+# # Option 2: Load just weights, then recreate model structure
+# loaded_model = tf.keras.models.Model(inputs=base_model.input, outputs=predictions)  # Your original model structure
+# loaded_model.load_weights('face_recognition_model_weights.h5') 
+
+### EXTRACT GLOBAL FEATURES
+# # Create a new model that outputs the penultimate layer
+# feature_extractor = tf.keras.Model(inputs=loaded_model.input, outputs=loaded_model.layers[-2].output)  
+
+# # ... (Load your image or dataset) ...
+# features = feature_extractor.predict(your_image_data)
+
+# # Load your image or dataset...
+# predictions = loaded_model.predict(your_image_data)
+
+
+##### EXTRACT
+# # Load the model
+# loaded_model = tf.keras.models.load_model('face_recognition_model')
+
+# # Create feature extractor
+# feature_extractor = tf.keras.Model(inputs=loaded_model.input, outputs=loaded_model.layers[-2].output)  
+
+# # Get features for an image
+# image_path = 'path/to/your/image.jpg'
+# img = tf.keras.preprocessing.image.load_img(image_path, target_size=(224, 224))
+# img_array = tf.keras.preprocessing.image.img_to_array(img)
+# img_array = np.expand_dims(img_array, axis=0)  
+# img_array = tf.keras.applications.vgg16.preprocess_input(img_array)
+# features = feature_extractor.predict(img_array)

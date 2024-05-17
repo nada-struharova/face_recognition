@@ -7,9 +7,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+import cv2
 
 # ------------------ Region Based Features ------------------ 
-def get_region_features(region, sift, surf, hog, lbp):
+def get_region_features(region, sift, surf, hog, lbp, daisy=False, orb=False):
     """ Extract local features of region.
     Args:
         region: Specific regions for local feature extraction.
@@ -42,6 +43,10 @@ def get_region_features(region, sift, surf, hog, lbp):
         if not isinstance(lbp_feat, np.ndarray):
             lbp_feat = np.array(lbp_feat)  # Convert to np array
         features = np.concatenate([features, lbp_feat])
+    if daisy:
+        daisy_feat = descriptors.extract_daisy_descriptors(region)
+        daisy_feat = daisy_feat.flatten()
+
 
     return features
 
@@ -179,35 +184,38 @@ def train_and_eval_random_forest(local_features):
 
     return accuracy, clf  # Return both accuracy and the trained classifier
 
-# ------------------ Program ------------------
-get_and_store_features_from_dataset()
+# # ------------------ Program ------------------
+# get_and_store_features_from_dataset()
 
-features_dict = utils.load_features()
+# features_dict = utils.load_features()
 
-# Calculate intra- and inter-identity distances of features
-final_distances = utils.calculate_l2_dist_euclidian(features_dict)
+# # Calculate intra- and inter-identity distances of features
+# final_distances = utils.calculate_l2_dist_euclidian(features_dict)
 
-# ------------------ Analysis & Visualisation ------------------ 
+# # ------------------ Analysis & Visualisation ------------------ 
 
-# Metrics and Distribution Analysis
-utils.analyse_features(final_distances)
+# # Metrics and Distribution Analysis
+# utils.analyse_features(final_distances)
 
-# Histograms of inter- and intra- distances
-utils.histograms(final_distances)
+# # Histograms of inter- and intra- distances
+# utils.histograms(final_distances)
 
-# ------------------ Random Forest Classifier Training ------------------ 
-accuracy, trained_rf_classifier = train_and_eval_random_forest(features_dict)
+# # ------------------ Random Forest Classifier Training ------------------ 
+# accuracy, trained_rf_classifier = train_and_eval_random_forest(features_dict)
 
 # ------------------ Visualise Preprocessing Results ------------------ 
-# image = cv2.imread('face_recognition/datasets/evaluate_local/Nada/025.jpeg')  
-# faces = RetinaFace.detect_faces(image)  
+image = cv2.imread('face_recognition/datasets/evaluate_local/Nada/025.jpeg')  
+faces = RetinaFace.detect_faces(image)  
 
-# for face_id, face_data in faces.items():
-#     face_img, resized_landmarks = preprocess_face(image.copy(), face_data)
+for face_id, face_data in faces.items():
+    face_img, resized_landmarks = utils.preprocess_face(image.copy(), face_data)
 
-#     print("Resized Image Shape: ", face_img.shape)
-#     for landmark_name, (x, y) in resized_landmarks.items():
-#         print(f"New Landmark: {landmark_name}, Position: ({x}, {y})")  
+    print("Resized Image Shape: ", face_img.shape)
+    for landmark_name, (x, y) in resized_landmarks.items():
+        print(f"New Landmark: {landmark_name}, Position: ({x}, {y})")  
 
-#     # Display the images with landmarks
-#     visualize_preprocessed_face(face_img, resized_landmarks) 
+    # Display the images with landmarks
+    utils.visualize_preprocessed_face(face_img, resized_landmarks) 
+
+    rois = utils.extract_roi_around_landmarks(face_img, resized_landmarks)
+    utils.visualise_rois(face_img, resized_landmarks, rois)

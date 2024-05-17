@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from skimage.feature import local_binary_pattern
+from skimage.feature import daisy
+from skimage.feature import rgb2gray
 
 # ------------------ Baseline Features ------------------ 
 def extract_raw_pixel_features(image):
@@ -97,3 +99,95 @@ def extract_lbp_features(region, radius=3, num_points=8):
     print("Dimension of LBP descriptor:", hist.shape)
     return hist
 
+def extract_daisy_descriptors(image, step=1, radius=15, rings=2, histograms=2, orientations=8, normalization='l1', visualize=False):
+    """
+    Extracts DAISY descriptors from a grayscale image.
+
+    Args:
+        image: The input grayscale image.
+        step: The sampling step size.
+        radius: The radius of the outermost ring.
+        rings: Number of rings.
+        histograms: Number of histograms per ring.
+        orientations: Number of orientations per histogram.
+        normalization: The descriptor normalization method ('l1' or 'l2').
+        visualize: If True, visualize the descriptors.
+
+    Returns:
+        descriptors: A numpy array of DAISY descriptors.
+        keypoints: A numpy array of keypoint coordinates (if visualize=True).
+    """
+    # Error Handling
+    # If image is RGB, convert to grayscale
+    if len(image.shape) == 3:
+        image = rgb2gray(image) 
+
+    # Extract DAISY descriptors
+    descriptors = daisy(
+        image, step=step, radius=radius, rings=rings, histograms=histograms,
+        orientations=orientations, normalization=normalization
+    )
+
+    # Visualize descriptors (optional)
+    if visualize:
+        from skimage.feature import draw_keypoints
+        import matplotlib.pyplot as plt
+
+        keypoints = np.array([
+            (i, j) for i in range(0, image.shape[0], step)
+            for j in range(0, image.shape[1], step)
+        ])
+        plt.imshow(draw_keypoints(image, keypoints, descriptors))
+        plt.show()
+
+    return descriptors
+
+def extract_orb_descriptors(image, num_keypoints=1000):
+    """
+    Extracts ORB keypoints and descriptors from a grayscale image.
+
+    Args:
+        image: The input grayscale image.
+        num_keypoints: The maximum number of keypoints to detect.
+
+    Returns:
+        keypoints: A list of KeyPoint objects.
+        descriptors: A numpy array of ORB descriptors.
+    """
+    
+    # Initialize ORB detector
+    orb = cv2.ORB_create(nfeatures=num_keypoints)  # Adjust num_keypoints if needed
+
+    # Find the keypoints and descriptors with ORB
+    keypoints, descriptors = orb.detectAndCompute(image, None)
+
+    return keypoints, descriptors
+def extract_orb_keypoints_sift_descriptors(image, num_keypoints=1000):
+    """
+    Extracts ORB keypoints and SIFT descriptors from a grayscale image.
+
+    Args:
+        image: The input grayscale image.
+        num_keypoints: The maximum number of keypoints to detect.
+
+    Returns:
+        keypoints: A list of KeyPoint objects.
+        descriptors: A numpy array of SIFT descriptors.
+    """
+
+    # Initialize ORB detector
+    orb = cv2.ORB_create(nfeatures=num_keypoints)
+
+    # Find the keypoints with ORB
+    orb_keypoints = orb.detect(image, None)
+
+    # Convert keypoints to KeyPoint objects for SIFT
+    orb_keypoints = [cv2.KeyPoint(kp.pt[0], kp.pt[1], kp.size) for kp in orb_keypoints]
+
+    # Initialize SIFT descriptor extractor
+    sift = cv2.SIFT_create()  
+
+    # Compute SIFT descriptors based on the ORB keypoints
+    orb_keypoints, sift_descriptors = sift.compute(image, orb_keypoints)  
+
+    return orb_keypoints, sift_descriptors

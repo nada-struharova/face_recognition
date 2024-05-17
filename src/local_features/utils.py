@@ -4,6 +4,7 @@ import cv2
 import pickle
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
+from matplotlib.patches import Rectangle
 
 # ------------------ Dataset Loading ------------------ 
 def load_dataset(dataset_path):
@@ -235,6 +236,73 @@ def split_into_landmark_regions(image, landmarks, expansion_factor=1.2):
 
     return regions
 
+def extract_roi_around_landmarks(image, landmarks, roi_size=56, padding=10):
+    """
+    Extracts ROIs around landmarks, handling edge cases and errors.
+
+    Args:
+        image: The input grayscale image (224x224, normalized).
+        landmarks: A numpy array of shape (5, 2) containing landmark coordinates (x, y).
+        roi_size: The desired size of each ROI (square).
+        padding: Additional padding around each landmark.
+
+    Returns:
+        rois: A list of image patches (ROIs) as numpy arrays, or None if errors occur.
+    """
+
+    rois = []
+    for landmark in landmarks:
+        x, y = landmark
+
+        # Error Handling
+        # Check if landmark is within image bounds
+        if not (0 <= x < image.shape[1] and 0 <= y < image.shape[0]):
+            print(f"Error: Landmark ({x}, {y}) is outside image bounds.")
+            return None  # Return None to signal error
+
+        # Get ROI boundaries with padding
+        x1 = max(0, int(x - roi_size / 2 - padding))
+        y1 = max(0, int(y - roi_size / 2 - padding))
+        x2 = min(image.shape[1], int(x + roi_size / 2 + padding))
+        y2 = min(image.shape[0], int(y + roi_size / 2 + padding))
+
+        # Extract ROI
+        roi = image[y1:y2, x1:x2]
+
+        # Error Handling
+        # Check if ROI is empty
+        if roi.size == 0:
+            print(f"Error: Empty ROI for landmark ({x}, {y}).")
+            return None  # Return None to signal error
+
+        # Resize ROI and interpolate
+        if roi.shape[0] != roi_size or roi.shape[1] != roi_size:
+            roi = cv2.resize(roi, (roi_size, roi_size), interpolation=cv2.INTER_AREA)  # Use INTER_AREA for shrinking
+
+        rois.append(roi)
+
+    return rois
+
+def visualise_rois(image, landmarks, rois):
+    """
+    Visualizes the image with landmarks and extracted ROIs.
+
+    Args:
+        image: The input image.
+        landmarks: A numpy array of landmark coordinates.
+        rois: A list of ROIs.
+    """
+    plt.imshow(image, cmap='gray')
+    for landmark in landmarks:
+        plt.scatter(landmark[0], landmark[1], color='red', marker='x')
+
+    for roi, landmark in zip(rois, landmarks):
+        x, y = landmark
+        x1 = int(x - roi.shape[1] / 2)
+        y1 = int(y - roi.shape[0] / 2)
+        plt.gca().add_patch(Rectangle((x1, y1), roi.shape[1], roi.shape[0], linewidth=2, edgecolor='green', facecolor='none'))
+    plt.show()
+
 # ------------------ Storing Feature Vectors and Descriptors ------------------ 
 def save_features(features_dict, filename="extracted_features.pkl"):
     """Saves feature vectors to a file using pickle.
@@ -395,3 +463,6 @@ def discriminative_power(true_labels, decision_scores):
     plt.title('Receiver Operating Characteristic')
     plt.legend(loc="lower right")
     plt.show()
+
+image = cv2.imread('face_recognition/datasets/evaluate_local/Naty/001.jpeg')
+
