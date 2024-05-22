@@ -2,14 +2,14 @@ datasets/evaluate_local/
 datasets/lfw/
 datasets/celeb_a
 .DS_Store
-# *.tmp
-# *.temp
-# *.log
-# temp/
-# tmp/
-# .vscode/
-# *.pyc
-# __pycache__/
-# venv/
-# env/
-# myenv/
+*.pyc
+__pycache__/
+*.tmp
+*.temp
+*.log
+temp/
+tmp/
+.vscode/
+venv/
+env/
+myenv/
