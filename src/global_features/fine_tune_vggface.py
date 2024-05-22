@@ -15,42 +15,57 @@ def prepare_celeba_fr(
     val_ratio=0.1,
     test_ratio=0.1
 ):
-    # Load identity information
-    identity_df = pd.read_csv(identity_file, sep=' ', header=None, names=['filename', 'identity'])
-    identity_df['identity'] = identity_df['identity'].astype(int)
+    if os.path.exists(base_split_dir):
+        print("Split directories already exist. Skipping splitting process.")
+    else:
+        # Load identity information
+        identity_df = pd.read_csv(identity_file, sep=' ', header=None, names=['filename', 'identity'])
+        identity_df['identity'] = identity_df['identity'].astype(int)
 
-    unique_ids = identity_df['identity'].unique()
-    num_ids = len(unique_ids)
+        unique_ids = identity_df['identity'].unique()
+        num_ids = len(unique_ids)
 
-    # Create split directories
-    for partition_name in ['train', 'val', 'test']:
-        partition_dir = os.path.join(base_split_dir, partition_name)
-        if not os.path.exists(partition_dir):
-            os.makedirs(partition_dir)
+        # Create split directories
+        for partition_name in ['train', 'val', 'test']:
+            partition_dir = os.path.join(base_split_dir, partition_name)
+            if not os.path.exists(partition_dir):
+                os.makedirs(partition_dir)
+            for identity in unique_ids:
+                identity_dir = os.path.join(partition_dir, str(identity))
+                if not os.path.exists(identity_dir):
+                    os.makedirs(identity_dir)
+
         for identity in unique_ids:
-            identity_dir = os.path.join(partition_dir, str(identity))
-            if not os.path.exists(identity_dir):
-                os.makedirs(identity_dir)
+            identity_images = identity_df[identity_df['identity'] == identity]['filename'].tolist()
 
-    for identity in unique_ids:
-        identity_images = identity_df[identity_df['identity'] == identity]['filename'].tolist()
+            if len(identity_images) <= 1:
+                # If there is only one sample, assign it to both train and test sets
+                train_images = identity_images
+                test_images = identity_images
+                val_images = []
+            elif len(identity_images) <= 2:
+                # If there are only two samples, assign one to train and one to test, leave validation empty
+                train_images = identity_images[:1]
+                test_images = identity_images[1:]
+                val_images = []
+            else:
+                train_images, temp_images = train_test_split(identity_images, train_size=train_ratio, random_state=42)
+            if len(temp_images) <= 1:
+                # If there is only one sample left for validation, assign it to validation and leave test empty
+                val_images = temp_images
+                test_images = []
+            else:
+                val_images, test_images = train_test_split(temp_images, test_size=test_ratio/(val_ratio+test_ratio), random_state=42)
 
-        # Split images into train, val, and test
-        train_images, temp_images = train_test_split(identity_images, train_size=train_ratio, random_state=42)
-        val_images, test_images = train_test_split(temp_images, test_size=test_ratio/(val_ratio + test_ratio), random_state=42)
-
-        # Move images to their respective directories
-        for img in train_images:
-            shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'train', str(identity), img))
-        
-        for img in val_images:
-            shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'val', str(identity), img))
-        
-        for img in test_images:
-            shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'test', str(identity), img))
-
-    # Convert labels to one-hot encoding
-    labels = {k: tf.one_hot(v, num_ids) for k, v in labels.items()}
+            # Move images to their respective directories
+            for img in train_images:
+                shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'train', str(identity), img))
+            
+            for img in val_images:
+                shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'val', str(identity), img))
+            
+            for img in test_images:
+                shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'test', str(identity), img))
 
     def load_and_preprocess_image(file_path, label):
         image = tf.io.read_file(file_path)
@@ -72,22 +87,42 @@ def prepare_celeba_fr(
         # Apply custom augmentation layer
         image = synthetic_augmentation(image, training=True)
         return image, label
+    
+    def get_image_paths_and_labels(partition):
+        image_paths = []
+        labels = []
+        partition_dir = os.path.join(base_split_dir, partition)
+        for identity in unique_ids:
+            identity_dir = os.path.join(partition_dir, str(identity))
+            for img_name in os.listdir(identity_dir):
+                image_paths.append(os.path.join(identity_dir, img_name))
+                labels.append(identity)
+        return image_paths, labels
+
+    train_image_paths, train_labels = get_image_paths_and_labels('train')
+    val_image_paths, val_labels = get_image_paths_and_labels('val')
+    test_image_paths, test_labels = get_image_paths_and_labels('test')
+
+    # Convert labels to one-hot encoding
+    train_labels = tf.one_hot(train_labels, num_ids)
+    val_labels = tf.one_hot(val_labels, num_ids)
+    test_labels = tf.one_hot(test_labels, num_ids)
 
     datasets = {
-        'train': tf.data.Dataset.from_tensor_slices((tf.constant(image_paths['train']), labels['train']))
+            'train': tf.data.Dataset.from_tensor_slices((tf.constant(train_image_paths), train_labels))
+                                    .map(load_and_preprocess_image)
+                                    .batch(batch_size),
+            'val': tf.data.Dataset.from_tensor_slices((tf.constant(val_image_paths), val_labels))
                                 .map(load_and_preprocess_image)
                                 .batch(batch_size),
-        'val': tf.data.Dataset.from_tensor_slices((tf.constant(image_paths['val']), labels['val']))
-                               .map(load_and_preprocess_image)
-                               .batch(batch_size),
-        'test_original': tf.data.Dataset.from_tensor_slices((tf.constant(image_paths['test']), labels['test']))
-                                      .map(load_and_preprocess_image)
-                                      .batch(batch_size),
-        'test_augmented': tf.data.Dataset.from_tensor_slices((tf.constant(image_paths['test']), labels['test']))
-                                       .map(load_and_preprocess_image)
-                                       .map(augment_image)
-                                       .batch(batch_size)
-    }
+            'test_original': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
+                                        .map(load_and_preprocess_image)
+                                        .batch(batch_size),
+            'test_augmented': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
+                                        .map(load_and_preprocess_image)
+                                        .map(augment_image)
+                                        .batch(batch_size)
+        }
 
     return datasets['train'], datasets['val'], datasets['test_original'], datasets['test_augmented'], num_ids
 
@@ -109,7 +144,7 @@ def prepare_celeba_dataset(
     # number of classes
     unique_ids = df['identity'].unique()
     num_ids = len(unique_ids)
-    
+
     partitions = {'train': 0, 'val': 1, 'test': 2}
 
     def filter_empty_identity_directories(base_split_dir, partitions=['train', 'val', 'test']):
@@ -207,7 +242,7 @@ def prepare_celeba_dataset(
     return datasets['train'], datasets['val'], datasets['test_original'], datasets['test_augmented'], num_ids
     
 # Load CelebA dataset
-train_dataset, validation_dataset, test_dataset_original, test_dataset_augmented, num_classes = prepare_celeba_dataset('face_recognition/datasets/celeb_a/img_align_celeba')
+train_dataset, validation_dataset, test_dataset_original, test_dataset_augmented, num_classes = prepare_celeba_fr('face_recognition/datasets/celeb_a/img_align_celeba')
 
 # Load VGG16 base model with VGGFace weights (without top - for fine tuning)
 base_model = tf.keras.applications.VGG16(weights=None,
@@ -277,16 +312,19 @@ weights_path = os.path.join(weights_dir, 'fine_tuned_weights.h5')
 os.makedirs(model_dir, exist_ok=True)
 os.makedirs(weights_dir, exist_ok=True)
 
+# Try to save the entire model
 try:
-    # Save the entire model
-    model.save(model_dir)  # Creates a directory with model structure and weights
+    model.save(model_dir)
     print(f"Model saved successfully at {model_dir}")
+except Exception as e:
+    print(f"An error occurred while saving the model: {e}")
 
-    # Save just the weights (smaller file size)
-    model.save_weights(weights_path)  # Only saves the weights
+# Try to save the weights separately
+try:
+    model.save_weights(weights_path)
     print(f"Weights saved successfully at {weights_path}")
 except Exception as e:
-    print(f"An error occurred while saving the model or weights: {e}")
+    print(f"An error occurred while saving the weights: {e}")
 
 # # Option 1: Load entire model
 # loaded_model = tf.keras.models.load_model('face_recognition_model')
