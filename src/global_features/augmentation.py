@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import cv2
+import matplotlib.pyplot as plt
 
 def occlude_eyes(image):
     """ Add a rectangle occlusion over the eyes in the image to simulate sunglasses. 
