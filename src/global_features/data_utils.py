@@ -1,21 +1,43 @@
 import tensorflow as tf
-import tensorflow_datasets as tfds
-import cv2
-import face_recognition.src.global_features.lfw_augmentation as lfw_augmentation
 import shutil
 import os
 import pandas as pd
 import augmentation_layer
 from sklearn.model_selection import train_test_split
+# import tensorflow_datasets as tfds
+# import cv2
+# import lfw_augmentation
 
 # Preprocess for ResNet50 fine tuning, make (image, label) pairs
-def preprocess_image_resnet50(label, image):
-    # Resize and normalise
-    image = tf.image.resize(image, (224, 224))
-    image = tf.keras.applications.resnet50.preprocess_input(image)
+# def preprocess_image_resnet50(label, image):
+#     # Resize and normalise
+#     image = tf.image.resize(image, (224, 224))
+#     image = tf.keras.applications.resnet50.preprocess_input(image)
 
-    # Switch label, image
-    return image, label
+#     # Switch label, image
+#     return image, label
+
+# def read_image(path):
+#     image = cv2.imread(path)
+#     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+#     return image
+
+# def load_dataset():
+#     (ds, train_ds, val_ds, test_ds), metadata = tfds.load(
+#         'lfw',
+#         data_dir='face_recognition/datasets/lfw',
+#         split=['train', 'train[:80%]', 'train[80%:90%]', 'train[90%:]'],
+#         as_supervised=True,
+#         with_info=True,
+#         batch_size=32
+#     )
+    
+#     train_ds = train_ds.map(
+#         lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
+#     val_ds = val_ds.map(
+#         lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
+#     test_ds = test_ds.map(
+#         lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
 
 def load_and_preprocess_image(file_path, label):
         ## CelebA to VGG16
@@ -25,28 +47,6 @@ def load_and_preprocess_image(file_path, label):
         image = tf.keras.applications.vgg16.preprocess_input(image)
         label = tf.cast(label, tf.int32)
         return image, label
-
-def read_image(path):
-    image = cv2.imread(path)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    return image
-
-def load_dataset():
-    (ds, train_ds, val_ds, test_ds), metadata = tfds.load(
-        'lfw',
-        data_dir='face_recognition/datasets/lfw',
-        split=['train', 'train[:80%]', 'train[80%:90%]', 'train[90%:]'],
-        as_supervised=True,
-        with_info=True,
-        batch_size=32
-    )
-    
-    train_ds = train_ds.map(
-        lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
-    val_ds = val_ds.map(
-        lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
-    test_ds = test_ds.map(
-        lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
 
 # Prepare CelebA Dataset for Training
 def prepare_celeba_fr(
@@ -58,16 +58,24 @@ def prepare_celeba_fr(
     val_ratio=0.1,
     test_ratio=0.1
 ):
+    # Load identity file
+    identity_df = pd.read_csv(identity_file, sep=' ', header=None, names=['filename', 'identity'])
+    identity_df['identity'] = identity_df['identity'].astype(int)
+
+    # Sort identities to ensure consistent mapping
+    unique_ids = sorted(identity_df['identity'].unique())
+
+    # Create a label mapping dictionary (identity -> integer index)
+    id_to_label = {identity: label + 1 for label, identity in enumerate(unique_ids)}  # Labels start from 1
+
+    # Add a new column for the mapped integer labels
+    identity_df['label'] = identity_df['identity'].map(id_to_label)
+
+    num_ids = len(unique_ids)  # Total number of classes/identities
+
     if os.path.exists(base_split_dir):
         print("Split directories already exist. Skipping splitting process.")
     else:
-        # Load identity information
-        identity_df = pd.read_csv(identity_file, sep=' ', header=None, names=['filename', 'identity'])
-        identity_df['identity'] = identity_df['identity'].astype(int)
-
-        unique_ids = identity_df['identity'].unique()
-        num_ids = len(unique_ids)
-
         # Create split directories
         for partition_name in ['train', 'val', 'test']:
             partition_dir = os.path.join(base_split_dir, partition_name)
@@ -112,7 +120,7 @@ def prepare_celeba_fr(
 
     # Instantiate synthetic augmentation layer
     synthetic_augmentation = augmentation_layer.RandomOcclusionLayer(
-        augmentation_prob=0.4,  # with 40% chance of synthetic occlusion
+        augmentation_prob=0.2,  # with 40% chance of synthetic occlusion
         sunglasses_path='face_recognition/datasets/augment/black_sunglasses.png',
         hat_path='face_recognition/datasets/augment/hat.png',
         mask_path='face_recognition/datasets/augment/mask.png'
@@ -123,41 +131,83 @@ def prepare_celeba_fr(
         image = synthetic_augmentation(image, training=True)
         return image, label
     
+    # Original
+    # def get_image_paths_and_labels(partition):
+    #     image_paths = []
+    #     labels = []
+    #     partition_dir = os.path.join(base_split_dir, partition)
+    #     for identity in unique_ids:
+    #         identity_dir = os.path.join(partition_dir, str(identity))
+    #         for img_name in os.listdir(identity_dir):
+    #             image_paths.append(os.path.join(identity_dir, img_name))
+    #             labels.append(identity)
+    #     return image_paths, labels
+    
+    # Uses mapping and CCE
+    # def get_image_paths_and_labels(partition):
+    #     image_paths = []
+    #     labels = []
+    #     partition_dir = os.path.join(base_split_dir, partition)
+    #     for identity in unique_ids:  # Use unique_ids to ensure all classes are covered
+    #         identity_dir = os.path.join(partition_dir, str(identity))
+    #         for img_name in os.listdir(identity_dir):
+    #             image_paths.append(os.path.join(identity_dir, img_name))
+    #             labels.append(id_to_label[identity])  # Use the label mapping
+    #     return image_paths, labels
+    
+    # Uses mapping and SCCE
     def get_image_paths_and_labels(partition):
         image_paths = []
         labels = []
         partition_dir = os.path.join(base_split_dir, partition)
-        for identity in unique_ids:
+        for identity in unique_ids:  # Iterate over unique IDs
             identity_dir = os.path.join(partition_dir, str(identity))
             for img_name in os.listdir(identity_dir):
                 image_paths.append(os.path.join(identity_dir, img_name))
-                labels.append(identity)
+                labels.append(id_to_label[identity])  # Use the integer label from the mapping
         return image_paths, labels
 
     train_image_paths, train_labels = get_image_paths_and_labels('train')
     val_image_paths, val_labels = get_image_paths_and_labels('val')
     test_image_paths, test_labels = get_image_paths_and_labels('test')
 
-    # Convert labels to one-hot encoding
-    train_labels = tf.one_hot(train_labels, num_ids)
-    val_labels = tf.one_hot(val_labels, num_ids)
-    test_labels = tf.one_hot(test_labels, num_ids)
+    # # Convert labels to one-hot encoding -> use with 'categorical crossentropy'
+    # train_labels = tf.one_hot(train_labels, num_ids)
+    # val_labels = tf.one_hot(val_labels, num_ids)
+    # test_labels = tf.one_hot(test_labels, num_ids)
+
+    # Convert lists to tensors
+    train_labels = tf.constant(train_labels, dtype=tf.int32)
+    val_labels = tf.constant(val_labels, dtype=tf.int32)
+    test_labels = tf.constant(test_labels, dtype=tf.int32)
+
+    print("Train labels min:", tf.reduce_min(train_labels).numpy(), "max:", tf.reduce_max(train_labels).numpy())
+    print("Val labels min:", tf.reduce_min(val_labels).numpy(), "max:", tf.reduce_max(val_labels).numpy())
+    print("Test labels min:", tf.reduce_min(test_labels).numpy(), "max:", tf.reduce_max(test_labels).numpy())
 
     datasets = {
             'train': tf.data.Dataset.from_tensor_slices((tf.constant(train_image_paths), train_labels))
-                                    .map(load_and_preprocess_image)
+                                    .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                    .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                    # .shuffle(buffer_size=len(train_image_paths))
                                     .batch(batch_size),
             'val': tf.data.Dataset.from_tensor_slices((tf.constant(val_image_paths), val_labels))
-                                .map(load_and_preprocess_image)
+                                .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
                                 .batch(batch_size),
             'test_original': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
-                                        .map(load_and_preprocess_image)
+                                        .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
                                         .batch(batch_size),
             'test_augmented': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
-                                        .map(load_and_preprocess_image)
-                                        .map(augment_image)
+                                        .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                        .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
                                         .batch(batch_size)
         }
+    
+    print("Train dataset length:", len(list(datasets['train'])))
+    print("Val dataset length:", len(list(datasets['val'])))
+    print("Test original dataset length:", len(list(datasets['test_original'])))
+    print("Test augmented dataset length:", len(list(datasets['test_augmented'])))
 
     return datasets['train'], datasets['val'], datasets['test_original'], datasets['test_augmented'], num_ids
 

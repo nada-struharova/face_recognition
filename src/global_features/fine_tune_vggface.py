@@ -14,6 +14,18 @@ BATCH_SIZE = 32
 # Load CelebA dataset
 train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = data_utils.prepare_celeba_fr(BASE_IMG_DIR)
 
+# Clear the training session
+tf.keras.backend.clear_session()
+
+# DEBUGGING
+for images, labels in train_ds.take(1):
+   print("Image batch shape:", images.shape)
+   print("Label batch shape:", labels.shape)
+   print("Sample labels:", labels.numpy()[:5]) # Print first 5 labels
+
+# # WITH UNKNOWN CLASS
+# num_classes += 1
+
 # Load the selected model
 if MODEL_TYPE == 'vgg16':
     model = model_utils.load_vgg16_model(num_classes, VGG16_WEIGHTS_PATH)
@@ -31,29 +43,47 @@ else:
     raise ValueError(f"Unknown model type: {MODEL_TYPE}")
 
 # Compile the model
+# tf.keras.optimizers.RMSprop(learning_rate=0.0001)
 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
-              loss='categorical_crossentropy',
-              metrics=['accuracy', 'precision', 'recall'])
+              loss='sparse_categorical_crossentropy',
+              metrics=['accuracy'])
 
 # Performance optimization: prefetch and cache data
-train_ds = train_ds.take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-val_ds = val_ds.take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-test_ds_og = test_ds_og.take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-test_ds_aug = test_ds_aug.take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+train_ds = train_ds.repeat().take(10000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+val_ds = val_ds.repeat().take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+test_ds_og = test_ds_og.repeat().take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+test_ds_aug = test_ds_aug.repeat().take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
 
-# Fine-tune the model
-early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=7, restore_best_weights=True)
+# Early Stopping Callback
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                  patience=10,
+                                                  restore_best_weights=True)
 
+# Dynamic Reduction of Learning Rate
 reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
-    monitor='val_loss', factor=0.1, patience=3, min_lr=1e-7
-)
+    monitor='val_loss',
+    factor=0.1,
+    patience=5,
+    min_lr=1e-7)
+
+# Model Checkpoint: saves best weights
+checkpoint_filepath = os.path.join(WEIGHTS_DIR, 'best_weights.weights.h5')
+checkpoint = tf.keras.callbacks.ModelCheckpoint(checkpoint_filepath,
+                                                monitor='val_acc',
+                                                verbose=1, 
+                                                save_best_only=True,
+                                                save_weights_only=True,
+                                                mode='max')
 
 model.fit(
     train_ds,
     epochs=50,
     validation_data=val_ds,
-    callbacks=[early_stopping, reduce_lr]
+    callbacks=[early_stopping, reduce_lr, checkpoint]
 )
+
+# Load the best weights
+model.load_weights(checkpoint_filepath)
 
 # Evaluate on the original test set
 original_test_loss, original_test_accuracy = model.evaluate(test_ds_og)
@@ -63,6 +93,20 @@ augmented_test_loss, augmented_test_accuracy = model.evaluate(test_ds_aug)
 
 print("Original Test Accuracy:", original_test_accuracy)
 print("Augmented Test Accuracy:", augmented_test_accuracy)
+
+# Evaluate on the original test set with threshold
+original_test_accuracy_threshold, original_test_precision_threshold, original_test_recall_threshold, original_test_f1_threshold = model_utils.evaluate_with_threshold(model, test_ds_og)
+print("Original Test Accuracy with Threshold:", original_test_accuracy_threshold)
+print("Original Test Precision with Threshold:", original_test_precision_threshold)
+print("Original Test Recall with Threshold:", original_test_recall_threshold)
+print("Original Test F1 Score with Threshold:", original_test_f1_threshold)
+
+# Evaluate on the augmented test set with threshold
+augmented_test_accuracy_threshold, augmented_test_precision_threshold, augmented_test_recall_threshold, augmented_test_f1_threshold = model_utils.evaluate_with_threshold(model, test_ds_aug)
+print("Augmented Test Accuracy with Threshold:", augmented_test_accuracy_threshold)
+print("Augmented Test Precision with Threshold:", augmented_test_precision_threshold)
+print("Augmented Test Recall with Threshold:", augmented_test_recall_threshold)
+print("Augmented Test F1 Score with Threshold:", augmented_test_f1_threshold)
 
 # Paths to save model and weights
 model_dir = 'face_recognition/src/global_features/model.keras'
