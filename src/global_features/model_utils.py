@@ -74,7 +74,7 @@ def load_vgg16_model(num_ids, weights_path):
     base_model.load_weights(weights_path)
 
     # Freeze base model layers (optional)
-    for layer in base_model.layers[-2:]:
+    for layer in base_model.layers:
         layer.trainable = False
 
     # Add custom top layers with L1 and L2 regularization
@@ -101,8 +101,6 @@ def load_vgg16_model(num_ids, weights_path):
     # x = tf.keras.layers.BatchNormalization()(x)
     # predictions = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
     
-    print('predictions: ', predictions.shape)
-    print('inputs ', base_model.input.shape)
     return model
 
 # Thresholding model predictions
