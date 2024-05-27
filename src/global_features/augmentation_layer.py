@@ -12,8 +12,8 @@ class RandomOcclusionLayer(layers.Layer):
         self.mask = self.load_image(mask_path)
         self.augmentation_images = {
             'sunglasses': self.sunglasses,
-            'hat': self.hat,
-            'mask': self.mask
+            'hat': self.hat
+            # 'mask': self.mask
         }
         self.scaling_factors = {
             'sunglasses': 0.5,
@@ -182,20 +182,6 @@ def visualize_augmentation(original_image, augmented_image):
     plt.axis('off')
 
     plt.show()
-
-# ------------ EXAMPLE USAGE ------------ 
-# # Example usage in a dataset map function
-# def augment_image(image, label, augment_layer):
-#     image = augment_layer(image, training=True)
-#     return image, label
-
-# # Example initialization
-# augmentation_layer = RandomOcclusionLayer(
-#     augmentation_prob=0.4,
-#     sunglasses_path='face_recognition/datasets/augment/black_sunglasses.png',
-#     hat_path='face_recognition/datasets/augment/hat.png',
-#     mask_path='face_recognition/datasets/augment/mask.png'
-# )
 
 # ------------ Visualise for REPORT "Proposed Model" ------------ 
 # # Paths
