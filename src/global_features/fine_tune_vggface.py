@@ -2,6 +2,7 @@ import tensorflow as tf
 import os
 import data_utils
 import model_utils
+import confusion_matrix as cm
 
 # Constants
 BASE_IMG_DIR = 'face_recognition/datasets/celeb_a/img_align_celeba'
@@ -9,22 +10,14 @@ VGG16_WEIGHTS_PATH = 'face_recognition/src/global_features/weights/rcmalli_vggfa
 MODEL_TYPE = 'vgg16'  # Other options: 'facenet', 'arcface'
 MODEL_DIR = 'face_recognition/src/global_features'
 WEIGHTS_DIR = os.path.join(MODEL_DIR, 'weights')
+LOSS_FUNC = 'sparse_categorical_crossentropy'
 BATCH_SIZE = 32
 
 # Load CelebA dataset
-train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = data_utils.prepare_celeba_fr(BASE_IMG_DIR)
+train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = data_utils.prepare_celeba_fr(BASE_IMG_DIR, loss_func=LOSS_FUNC, batch_size=BATCH_SIZE)
 
 # Clear the training session
 tf.keras.backend.clear_session()
-
-# DEBUGGING
-for images, labels in train_ds.take(1):
-   print("Image batch shape:", images.shape)
-   print("Label batch shape:", labels.shape)
-   print("Sample labels:", labels.numpy()[:5]) # Print first 5 labels
-
-# # WITH UNKNOWN CLASS
-# num_classes += 1
 
 # Load the selected model
 if MODEL_TYPE == 'vgg16':
@@ -45,14 +38,17 @@ else:
 # Compile the model
 # tf.keras.optimizers.RMSprop(learning_rate=0.0001)
 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
-              loss='sparse_categorical_crossentropy',
-              metrics=['accuracy'])
+              loss=LOSS_FUNC,
+              metrics=['accuracy',
+                        cm.Precision,
+                        cm.Recall(),
+                        cm.F1Score()])
 
 # Performance optimization: prefetch and cache data
-train_ds = train_ds.repeat().take(10000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-val_ds = val_ds.repeat().take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-test_ds_og = test_ds_og.repeat().take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-test_ds_aug = test_ds_aug.repeat().take(5000).cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+train_ds = train_ds.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
+val_ds = val_ds.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
+test_ds_og = test_ds_og.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
+test_ds_aug = test_ds_aug.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
 
 # Early Stopping Callback
 early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
@@ -63,7 +59,7 @@ early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
 reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
     monitor='val_loss',
     factor=0.1,
-    patience=5,
+    patience=3,
     min_lr=1e-7)
 
 # Model Checkpoint: saves best weights
