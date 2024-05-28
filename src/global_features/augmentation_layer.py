@@ -12,8 +12,8 @@ class RandomOcclusionLayer(layers.Layer):
         self.mask = self.load_image(mask_path)
         self.augmentation_images = {
             'sunglasses': self.sunglasses,
-            'hat': self.hat
-            # 'mask': self.mask
+            'hat': self.hat,
+            'mask': self.mask
         }
         self.scaling_factors = {
             'sunglasses': 0.5,

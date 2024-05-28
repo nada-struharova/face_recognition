@@ -2,9 +2,11 @@ import tensorflow as tf
 import shutil
 import os
 import uuid
+import numpy as np
 import pandas as pd
 import augmentation_layer
 from sklearn.model_selection import train_test_split
+
 # import tensorflow_datasets as tfds
 # import cv2
 # import lfw_augmentation
@@ -26,21 +28,35 @@ from sklearn.model_selection import train_test_split
 #     test_ds = test_ds.map(
 #         lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
 
-def load_and_preprocess_image(file_path, label):
-        ## Preprocess CelebA for VGG16
-        image = tf.io.read_file(file_path)
-        image = tf.image.decode_jpeg(image, channels=3)
-        image = tf.image.resize(image, (224, 224))
-        image = tf.keras.applications.vgg16.preprocess_input(image)
-        label = tf.cast(label, tf.int32)
-        return image, label
+def load_and_preprocess_image(file_path, label, bbox_tensor=None, filenames=None):
+    ## Preprocess CelebA for VGG16
+    image = tf.io.read_file(file_path)
+    image = tf.image.decode_jpeg(image, channels=3)
+
+    if bbox_tensor is not None:
+        # Extract corresponding filename
+        filename = tf.strings.split(file_path, os.sep)[-1]
+        filename_index = tf.where(filenames == filename)[0][0]
+
+        # Extract bounding box information using the index
+        bbox_info = bbox_tensor[filename_index]
+        x_1, y_1, width, height = bbox_info[0], bbox_info[1], bbox_info[2], bbox_info[3]
+
+        # Crop the image using the bounding box information
+        image = tf.image.crop_to_bounding_box(image, y_1, x_1, height, width)
+
+    image = tf.image.resize(image, (224, 224))
+    image = tf.keras.applications.vgg16.preprocess_input(image)
+    label = tf.cast(label, tf.int32)
+    return image, label
 
 # Prepare CelebA Dataset for Training
 def prepare_celeba_fr(
     base_img_dir,
     identity_file='face_recognition/datasets/celeb_a/identity_CelebA.txt',
+    bbox_file='face_recognition/datasets/celeb_a/list_bbox_celeba.txt',
     base_split_dir='face_recognition/datasets/celeb_a/split_fr',
-    loss_func='sparse_categorical_crossentropy',
+    loss_func='categorical_crossentropy',
     batch_size=32,
     train_ratio=0.8,
     val_ratio=0.1,
@@ -49,15 +65,32 @@ def prepare_celeba_fr(
     # Load identity file
     identity_df = pd.read_csv(identity_file, sep=' ', header=None, names=['filename', 'identity'])
     identity_df['identity'] = identity_df['identity'].astype(int)
+
+     # Load bounding box file
+    bbox_df = pd.read_csv(bbox_file, sep='\s+', skiprows=1, names=['filename', 'x', 'y', 'width', 'height'])
+    filenames = bbox_df['filename'].values
+    bbox_values = bbox_df[['x', 'y', 'width', 'height']].values
+
+    filenames_tf = tf.constant(filenames)
+    bbox_tensor = tf.constant(bbox_values, dtype=tf.int32)
+
     # Sort identities to ensure consistent mapping
     unique_ids = sorted(identity_df['identity'].unique())
+
+    # if loss_func == 'sparse_categorical_crossentropy':
     # Create a label mapping dictionary (identity -> integer index)
-    id_to_label = {identity: label + 1 for label, identity in enumerate(unique_ids)}  # Labels start from 1
+    id_to_label = {identity: (label + 1) for label, identity in enumerate(unique_ids)}  # Labels start from 1
     # Add a new column for the mapped integer labels
     identity_df['label'] = identity_df['identity'].map(id_to_label)
 
     # Total number of classes/identities
     num_ids = len(unique_ids)
+
+    # Check label shape
+    assert identity_df['label'].shape[0] == identity_df.shape[0], "Label shape mismatch"
+    # Check label assignment
+    for index, row in identity_df.iterrows():
+        assert id_to_label[row['identity']] == row['label'], f"Label assignment error at index {index}"
 
     # Preprocess dataset directory
     if os.path.exists(base_split_dir):
@@ -76,6 +109,7 @@ def prepare_celeba_fr(
         for identity in unique_ids:
             identity_images = identity_df[identity_df['identity'] == identity]['filename'].tolist()
 
+            # Edge case handling
             if len(identity_images) <= 1:
                 # If there is only one sample, assign it to both train and test sets
                 train_images = identity_images
@@ -112,29 +146,29 @@ def prepare_celeba_fr(
         hat_path='face_recognition/datasets/augment/hat.png',
         mask_path='face_recognition/datasets/augment/mask.png'
     )
-
-    def augment_image_train(image, label):
-        image = tf.identity(image)  # Create a copy of the image
-        # Apply custom augmentation layer
-        image = synthetic_augmentation(image, training=True)
-        return image, label
     
     def augment_image(image, label):
         # Apply custom augmentation layer
         image = synthetic_augmentation(image, training=True)
         return image, label
     
-    # Function to save augmented images
-    def save_augmented_image(image, label):
-        filename = str(uuid.uuid4()) + ".jpg"
-        base_split_dir = 'face_recognition/datasets/celeb_a/img_align_celeba'  # Update this to your correct path
+    # def augment_image_train(image, label):
+    #     image = tf.identity(image)  # Create a copy of the image
+    #     # Apply custom augmentation layer
+    #     image = synthetic_augmentation(image, training=True)
+    #     return image, label
+    
+    # # Function to save augmented images
+    # def save_augmented_image(image, label):
+    #     filename = str(uuid.uuid4()) + ".jpg"
+    #     base_split_dir = 'face_recognition/datasets/celeb_a/img_align_celeba'  # Update this to your correct path
 
-        def _save_img(img, lbl):
-            filepath = os.path.join(base_split_dir, 'train', str(lbl.numpy()), filename)
-            tf.keras.utils.save_img(filepath, img.numpy())  # Convert to NumPy before saving
-            return img, lbl
+    #     def _save_img(img, lbl):
+    #         filepath = os.path.join(base_split_dir, 'train', str(lbl.numpy()), filename)
+    #         tf.keras.utils.save_img(filepath, img.numpy())  # Convert to NumPy before saving
+    #         return img, lbl
 
-        return tf.py_function(_save_img, inp=[image, label], Tout=[tf.float32, tf.int32])
+    #     return tf.py_function(_save_img, inp=[image, label], Tout=[tf.float32, tf.int32])
 
     # Uses mapping and SCCE
     def get_image_paths_and_labels(partition):
@@ -152,34 +186,48 @@ def prepare_celeba_fr(
     val_image_paths, val_labels = get_image_paths_and_labels('val')
     test_image_paths, test_labels = get_image_paths_and_labels('test')
 
-    if loss_func == 'categorical_crossentropy':
-        # One-hot encoding for 'categorical crossentropy' (CCE)
-        train_labels = tf.one_hot(train_labels, num_ids)
-        val_labels = tf.one_hot(val_labels, num_ids)
-        test_labels = tf.one_hot(test_labels, num_ids)
-    elif loss_func == 'sparse_categorical_crossentropy':
+    # Check label shape
+    assert np.array(train_labels).shape == (len(train_labels),), "Train labels shape mismatch"
+    assert np.array(val_labels).shape == (len(val_labels),), "Validation labels shape mismatch"
+    assert np.array(test_labels).shape == (len(test_labels),), "Test labels shape mismatch"
+
+    # Check label range
+    assert min(train_labels) >= 1 and max(train_labels) <= num_ids, "Train labels out of range"
+    assert min(val_labels) >= 1 and max(val_labels) <= num_ids, "Validation labels out of range"
+    assert min(test_labels) >= 1 and max(test_labels) <= num_ids, "Test labels out of range"
+
+    if loss_func == 'sparse_categorical_crossentropy':
         # Convert to tensors
         train_labels = tf.constant(train_labels, dtype=tf.int32)
         val_labels = tf.constant(val_labels, dtype=tf.int32)
         test_labels = tf.constant(test_labels, dtype=tf.int32)
+    elif loss_func == 'categorical_crossentropy':
+        # One-hot encoding for 'categorical crossentropy' (CCE)
+        train_labels = tf.one_hot(train_labels, num_ids)
+        val_labels = tf.one_hot(val_labels, num_ids)
+        test_labels = tf.one_hot(test_labels, num_ids)
+    
+    print(f"Train labels shape (sparse): {train_labels.shape}")
+    print(f"Validation labels shape (sparse): {val_labels.shape}")
+    print(f"Test labels shape (sparse): {test_labels.shape}")
 
     datasets = {
             'train': tf.data.Dataset.from_tensor_slices((tf.constant(train_image_paths), train_labels))
-                                    .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
-                                    .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                    .map(lambda x, y: load_and_preprocess_image(x, y, bbox_tensor=None, filenames=filenames_tf), num_parallel_calls=tf.data.AUTOTUNE)
+                                    # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
                                     # .map(save_augmented_image, num_parallel_calls=tf.data.AUTOTUNE) # Add this line
                                     # .shuffle(buffer_size=len(train_image_paths))
                                     .batch(batch_size),
             'val': tf.data.Dataset.from_tensor_slices((tf.constant(val_image_paths), val_labels))
-                                .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                .map(lambda x, y: load_and_preprocess_image(x, y, bbox_tensor=None, filenames=filenames_tf), num_parallel_calls=tf.data.AUTOTUNE)
                                 # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
                                 .batch(batch_size),
             'test_original': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
-                                        .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                        .map(lambda x, y: load_and_preprocess_image(x, y, bbox_tensor=None, filenames=filenames_tf), num_parallel_calls=tf.data.AUTOTUNE)
                                         .batch(batch_size),
             'test_augmented': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
-                                        .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
-                                        .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                        .map(lambda x, y: load_and_preprocess_image(x, y, bbox_tensor=None, filenames=filenames_tf), num_parallel_calls=tf.data.AUTOTUNE)
+                                        # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
                                         .batch(batch_size)
         }
     
@@ -210,8 +258,9 @@ def prepare_celeba_extract(
             partition_dir = os.path.join(base_split_dir, partition)
             for identity_dir in os.listdir(partition_dir):
                 if identity_dir == '.DS_Store':
-                    continue  # Skip .DS_Store files
+                    continue  # Skip .DS_Store files created by MacOS
                 identity_path = os.path.join(partition_dir, identity_dir)
+
                 # Check if the directory is empty
                 if not os.listdir(identity_path):
                     # print(f"Removing empty identity directory: {identity_path}")
@@ -233,8 +282,8 @@ def prepare_celeba_extract(
             # Move to the specific identity subdirectory
             dst_path = os.path.join(base_split_dir, partition_name, str(row['identity']), row['filename'])
 
-            shutil.move(src_path, dst_path)
-            # shutil.copy2(src_path, dst_path)
+            # shutil.move(src_path, dst_path)
+            shutil.copy2(src_path, dst_path)
 
     # Filter out empty directories in train, val, and test sets
     filter_empty_identity_directories(base_split_dir)
