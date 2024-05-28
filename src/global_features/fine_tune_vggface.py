@@ -4,24 +4,26 @@ import data_utils
 import model_utils
 import confusion_matrix as cm
 
-# Constants
+# ---------------- Constants ----------------
+# Training Details
+MODEL_TYPE = 'vgg16'  # Other options: 'facenet', 'resnet50'
+LOSS_FUNC = 'categorical_crossentropy'
+BATCH_SIZE = 2
+
+# Directories
 BASE_IMG_DIR = 'face_recognition/datasets/celeb_a/img_align_celeba'
-VGG16_WEIGHTS_PATH = 'face_recognition/src/global_features/weights/rcmalli_vggface_tf_notop_vgg16.h5'
-MODEL_TYPE = 'vgg16'  # Other options: 'facenet', 'arcface'
 MODEL_DIR = 'face_recognition/src/global_features'
 WEIGHTS_DIR = os.path.join(MODEL_DIR, 'weights')
-LOSS_FUNC = 'sparse_categorical_crossentropy'
-BATCH_SIZE = 32
 
+# ---------------- Model Training ----------------
 # Load CelebA dataset
-train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = data_utils.prepare_celeba_fr(BASE_IMG_DIR, loss_func=LOSS_FUNC, batch_size=BATCH_SIZE)
-
-# Clear the training session
-tf.keras.backend.clear_session()
+train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = data_utils.prepare_celeba_fr(BASE_IMG_DIR,
+                                                                                      loss_func=LOSS_FUNC,
+                                                                                      batch_size=BATCH_SIZE)
 
 # Load the selected model
 if MODEL_TYPE == 'vgg16':
-    model = model_utils.load_vgg16_model(num_classes, VGG16_WEIGHTS_PATH)
+    model = model_utils.load_vgg16_model(num_classes)
     model_name = 'fr_vgg16_model.keras'
     weights_name = 'fr_vgg16_weights.h5'
 elif MODEL_TYPE == 'facenet':
@@ -32,21 +34,24 @@ elif MODEL_TYPE == 'arcface':
     model = model_utils.load_arcface_model(num_classes)
     model_name = 'fr_arcface_model.keras'
     weights_name = 'fr_arcface_weights.h5'
+elif MODEL_TYPE == 'resnet50':
+    model = model_utils.load_resnet50_model(num_classes)
 else:
     raise ValueError(f"Unknown model type: {MODEL_TYPE}")
 
-# Compile the model
-# tf.keras.optimizers.RMSprop(learning_rate=0.0001)
+# Check model summary to verify output shape
+model.summary()
+
+# Compile loaded model
 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
               loss=LOSS_FUNC,
               metrics=['accuracy',
-                        cm.Precision,
-                        cm.Recall(),
-                        cm.F1Score()])
+                       'precision',
+                       'recall'])
 
 # Performance optimization: prefetch and cache data
-train_ds = train_ds.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
-val_ds = val_ds.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
+train_ds = train_ds.take(10000).prefetch(buffer_size=tf.data.AUTOTUNE)
+val_ds = val_ds.take(7500).prefetch(buffer_size=tf.data.AUTOTUNE)
 test_ds_og = test_ds_og.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
 test_ds_aug = test_ds_aug.take(5000).prefetch(buffer_size=tf.data.AUTOTUNE)
 
@@ -58,28 +63,42 @@ early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
 # Dynamic Reduction of Learning Rate
 reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
     monitor='val_loss',
-    factor=0.1,
+    factor=0.5,
     patience=3,
     min_lr=1e-7)
 
 # Model Checkpoint: saves best weights
-checkpoint_filepath = os.path.join(WEIGHTS_DIR, 'best_weights.weights.h5')
-checkpoint = tf.keras.callbacks.ModelCheckpoint(checkpoint_filepath,
-                                                monitor='val_acc',
+checkpoint_path = os.path.join(WEIGHTS_DIR, 'vgg16_epoch:{epoch:02d}_val_acc:{val_accuracy:.2f}.weights.h5')
+checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                monitor='val_accuracy',
                                                 verbose=1, 
                                                 save_best_only=True,
                                                 save_weights_only=True,
                                                 mode='max')
 
-model.fit(
+metrics_callback = cm.MetricsCallback(validation_data=val_ds, num_classes=num_classes)
+
+history = model.fit(
     train_ds,
-    epochs=50,
+    epochs=10,
     validation_data=val_ds,
-    callbacks=[early_stopping, reduce_lr, checkpoint]
+    callbacks=[metrics_callback, early_stopping, reduce_lr, checkpoint]
 )
 
-# Load the best weights
-model.load_weights(checkpoint_filepath)
+# ---------------- Model Evaluation ----------------
+# # Load the best weights
+# model.load_weights(checkpoint_filepath)
+
+# Load the best weights after training
+best_weights = max(history.history['val_accuracy'])
+best_epoch = history.history['val_accuracy'].index(best_weights) + 1
+best_weights_path = os.path.join(WEIGHTS_DIR, f'vgg16_epoch:{best_epoch:02d}_val_acc:{best_weights:.2f}.weights.h5')
+
+if os.path.exists(best_weights_path):
+    model.load_weights(best_weights_path)
+    print(f"Weights successfully loaded from: {best_weights_path}")
+else:
+    print(f"Weights file not found: {best_weights_path}")
 
 # Evaluate on the original test set
 original_test_loss, original_test_accuracy = model.evaluate(test_ds_og)
@@ -104,25 +123,24 @@ print("Augmented Test Precision with Threshold:", augmented_test_precision_thres
 print("Augmented Test Recall with Threshold:", augmented_test_recall_threshold)
 print("Augmented Test F1 Score with Threshold:", augmented_test_f1_threshold)
 
+# ---------------- Save Model ----------------
 # Paths to save model and weights
-model_dir = 'face_recognition/src/global_features/model.keras'
-weights_dir = 'face_recognition/src/global_features/weights'
-weights_path = os.path.join(weights_dir, 'fine_tuned_weights.h5')
+final_model_path = os.path.join(MODEL_DIR, model_name)
+final_weights_path = os.path.join(WEIGHTS_DIR, weights_name)
 
-# Ensure directories exist
-os.makedirs(model_dir, exist_ok=True)
-os.makedirs(weights_dir, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(WEIGHTS_DIR, exist_ok=True)
 
-# Try to save the entire model
+# Save Model
 try:
-    model.save(model_dir)
-    print(f"Model saved successfully at {model_dir}")
+    model.save(final_model_path)
+    print(f"Model saved successfully at {final_model_path}")
 except Exception as e:
     print(f"An error occurred while saving the model: {e}")
 
-# Try to save the weights separately
+# Save Weights
 try:
-    model.save_weights(weights_path)
-    print(f"Weights saved successfully at {weights_path}")
+    model.save_weights(final_weights_path)
+    print(f"Weights saved successfully at {final_weights_path}")
 except Exception as e:
     print(f"An error occurred while saving the weights: {e}")
