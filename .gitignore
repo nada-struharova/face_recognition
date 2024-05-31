@@ -15,3 +15,4 @@ myenv/
 __pycache__/
 src/global_features/weights/rcmalli_vggface_tf_notop_resnet50.h5
 src/global_features/weights/rcmalli_vggface_tf_resnet50.h5
+src/global_features/rcmalli_vggface_tf_notop_vgg16.h5
