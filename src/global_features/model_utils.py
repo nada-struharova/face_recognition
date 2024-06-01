@@ -1,7 +1,21 @@
 import tensorflow as tf
 from keras_facenet import FaceNet
-# from insightface.model_zoo import get_model
+from sklearn.metrics import precision_score, recall_score, f1_score
+import numpy as np
 
+def load_model(model_type, num_classes):
+    # Load the selected model
+    if model_type == 'vgg16':
+        model = load_vgg16_model(num_classes)
+    elif model_type == 'facenet':
+        model = load_facenet_model(num_classes)
+    elif model_type == 'resnet50':
+        model = load_resnet50_model(num_classes)
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    return model
+    
 # ----------------- Loading Model -----------------
 # Load Pre-Trained FaceNet
 def load_facenet_model(num_classes):
@@ -37,7 +51,7 @@ def load_facenet_model(num_classes):
 # Load Pre-Trained VGG16
 def load_vgg16_model(num_ids,
                      include_top=False,
-                     weights_path='face_recognition/src/global_features/weights/rcmalli_vggface_tf_notop_vgg16.h5',):
+                     weights_path='face_recognition/src/global_features/weights/rcmalli_vggface_tf_notop_vgg16.h5'):
     # Load VGG16 base model with VGGFace weights (without top - for fine tuning)
     base_model = tf.keras.applications.VGG16(weights=None,
                                              include_top=include_top,
@@ -62,6 +76,38 @@ def load_vgg16_model(num_ids,
 
     # Create the final model
     model = tf.keras.models.Model(inputs=base_model.input, outputs=predictions)
+
+    return model
+
+def load_vgg16_model_triplet(embedding_size=128,
+                             include_top=False,
+                             weights_path='face_recognition/src/global_features/weights/rcmalli_vggface_tf_notop_vgg16.h5'):
+    # Load VGG16 base model with VGGFace weights (without top - for fine tuning)
+    base_model = tf.keras.applications.VGG16(weights=None,
+                                             include_top=include_top,
+                                             input_shape=(224, 224, 3))
+    base_model.load_weights(weights_path)
+
+    # Freeze base model layers
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    # Add custom top layers with L1 and L2 regularization
+    x = base_model.output
+
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(512, activation='relu',
+                             kernel_regularizer=tf.keras.regularizers.l2(0.001),
+                             bias_regularizer=tf.keras.regularizers.l1(0.001)
+                             )(x)
+    x = tf.keras.layers.Dropout(0.5)(x)
+
+    # Output embedding vectors for each image
+    embeddings = tf.keras.layers.Dense(embedding_size, activation=None, name='embeddings')(x)
+
+    # Create the final model with embedding output
+    model = tf.keras.models.Model(inputs=base_model.input, outputs=embeddings)
 
     return model
 
@@ -104,60 +150,46 @@ def load_resnet50_model(num_classes,
     
     return model
 
-# # Load ArcFace
-# def load_arcface_model(num_classes):
-#     # Load ArcFace model
-#     arcface_model = get_model('arcface_r100_v1')
-#     arcface_model.prepare(ctx_id=-1)  # Use -1 for CPU, set to GPU ID for GPU
-
-#     # Get the base model and remove the top layers
-#     base_model = arcface_model.model
-    
-#     # Freeze base model layers (optional)
-#     for layer in base_model.layers:
-#         layer.trainable = False
-
-#     # Add custom top layers with L1 and L2 regularization
-#     x = base_model.output
-#     x = tf.keras.layers.GlobalAveragePooling2D()(x)
-#     x = tf.keras.layers.Flatten()(x)
-#     x = tf.keras.layers.Dense(512, activation='relu', 
-#                               kernel_regularizer=tf.keras.regularizers.l2(0.00001),
-#                               bias_regularizer=tf.keras.regularizers.l1(0.00001))(x)
-#     x = tf.keras.layers.Dropout(0.5)(x)
-#     predictions = tf.keras.layers.Dense(num_classes, activation='softmax',
-#                                         kernel_regularizer=tf.keras.regularizers.l2(0.00001),
-#                                         bias_regularizer=tf.keras.regularizers.l1(0.00001))(x)
-
-#     # Create the final model
-#     model = tf.keras.models.Model(inputs=base_model.input, outputs=predictions)
-    
-#     return model
-
 # ----------------- Evaluate -----------------
 # Thresholding model predictions
-def predict_with_threshold(model, image, threshold=0.8):
-    prediction = model.predict(tf.expand_dims(image, axis=0))
-    max_prob = tf.reduce_max(prediction)
-    if max_prob < threshold:
-        return "unknown"
-    else:
-        return tf.argmax(prediction, axis=1).numpy()[0]
-
-# Evaluate with prediction threshold (hanle batches)
-def evaluate_with_threshold(model, dataset, threshold=0.8):
+def evaluate_model_with_threshold(model, dataset, threshold=0.8):
     correct_predictions = 0
     total_predictions = 0
+    true_positives = 0
+    false_positives = 0
+    false_negatives = 0
+    unknown_predictions = 0
+    
     for images, labels in dataset:
-        for i in range(len(images)):
-            image = images[i]
+        predictions = model.predict(images)
+        for i in range(len(predictions)):
+            prediction = predictions[i]
             label = labels[i]
-            predicted_label = predict_with_threshold(model, image, threshold)
-            if predicted_label == "unknown":
-                # Handle "unknown" predictions as required
-                pass
-            elif predicted_label == tf.argmax(label).numpy():
-                correct_predictions += 1
-            total_predictions += 1
-    accuracy = correct_predictions / total_predictions
-    return accuracy
+            max_prob = np.max(prediction)
+            
+            if max_prob < threshold:
+                unknown_predictions += 1
+            else:
+                predicted_label = np.argmax(prediction)
+                true_label = np.argmax(label)
+                
+                if predicted_label == true_label:
+                    correct_predictions += 1
+                    true_positives += 1
+                else:
+                    if predicted_label != 0:  # Predicted label is not unknown
+                        false_positives += 1
+                    if true_label != 0:  # True label is not unknown
+                        false_negatives += 1
+                        
+                total_predictions += 1
+    
+    accuracy = (correct_predictions + unknown_predictions) / (total_predictions + unknown_predictions) if (total_predictions + unknown_predictions) > 0 else 0.0
+    accuracy_excluding_unknown = correct_predictions / total_predictions if total_predictions > 0 else 0.0
+    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0.0
+    recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0.0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+    
+    return accuracy_excluding_unknown, accuracy, precision, recall, f1
+
+
