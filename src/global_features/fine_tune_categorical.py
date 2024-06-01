@@ -24,6 +24,12 @@ train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = data_utils.prepare_cele
                                                                                       loss_func=LOSS_FUNC,
                                                                                       batch_size=BATCH_SIZE)
 
+# Performance optimization: prefetch and cache data
+train_ds = train_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
+val_ds = val_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
+test_ds_og = test_ds_og.prefetch(buffer_size=tf.data.AUTOTUNE)
+test_ds_aug = test_ds_aug.prefetch(buffer_size=tf.data.AUTOTUNE)
+
 # Load specific model
 model = model_utils.load_model(MODEL_TYPE, BATCH_SIZE)
 
@@ -34,12 +40,6 @@ model.summary()
 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.00001),
               loss=LOSS_FUNC,
               metrics=['accuracy', 'precision', 'recall'])
-
-# Performance optimization: prefetch and cache data
-train_ds = train_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
-val_ds = val_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
-test_ds_og = test_ds_og.prefetch(buffer_size=tf.data.AUTOTUNE)
-test_ds_aug = test_ds_aug.prefetch(buffer_size=tf.data.AUTOTUNE)
 
 # Early Stopping Callback
 early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
@@ -65,6 +65,7 @@ checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
                                                 save_weights_only=True,
                                                 mode='max')
 
+# Display calculated metrics after each training epoch
 metrics_callback = cm.MetricsCallback(validation_data=val_ds)
 
 history = model.fit(
@@ -75,7 +76,7 @@ history = model.fit(
 )
 
 # ---------------- Model Evaluation ----------------
-# Load the best weights after training
+# Load best weights after training
 best_weights = max(history.history['val_accuracy'])
 best_epoch = history.history['val_accuracy'].index(best_weights) + 1
 best_weights_path = os.path.join(WEIGHTS_DIR, f'vgg16_epoch:{best_epoch:02d}_val_acc:{best_weights:.2f}.weights.h5')
@@ -86,28 +87,30 @@ if os.path.exists(best_weights_path):
 else:
     print(f"Weights file not found: {best_weights_path}")
 
+# Evaluate on the original test set with threshold
+test_acc_no_unknown, test_acc, test_precision, test_recall, test_f1 = model_utils.sevaluate_model_with_threshold(model, test_ds_og)
+
+print("Original Test Accuracy with Threshold, excluding unknowns: ", test_acc_no_unknown)
+print("Original Test Accuracy with Threshold:", test_acc)
+print("Original Test Precision with Threshold:", test_precision)
+print("Original Test Recall with Threshold:", test_recall)
+print("Original Test F1 Score with Threshold:", test_f1)
+
+# Evaluate on the augmented test set with threshold
+aug_test_acc_no_unknown, aug_test_acc, aug_test_precision, aug_test_recall, aug_test_f1 = model_utils.evaluate_with_threshold(model, test_ds_aug)
+print("Augmented Test Accuracy with Threshold, excluding unknowns: ", test_acc_no_unknown)
+print("Augmented Test Accuracy with Threshold:", aug_test_acc)
+print("Augmented Test Precision with Threshold:", aug_test_precision)
+print("Augmented Test Recall with Threshold:", aug_test_recall)
+print("Augmented Test F1 Score with Threshold:", aug_test_f1)
+
 # Evaluate on the original test set
 original_test_loss, original_test_accuracy = model.evaluate(test_ds_og)
-
 # Evaluate on the augmented test set
 augmented_test_loss, augmented_test_accuracy = model.evaluate(test_ds_aug)
 
 print("Original Test Accuracy:", original_test_accuracy)
 print("Augmented Test Accuracy:", augmented_test_accuracy)
-
-# Evaluate on the original test set with threshold
-original_test_accuracy_threshold, original_test_precision_threshold, original_test_recall_threshold, original_test_f1_threshold = model_utils.evaluate_with_threshold(model, test_ds_og)
-print("Original Test Accuracy with Threshold:", original_test_accuracy_threshold)
-print("Original Test Precision with Threshold:", original_test_precision_threshold)
-print("Original Test Recall with Threshold:", original_test_recall_threshold)
-print("Original Test F1 Score with Threshold:", original_test_f1_threshold)
-
-# Evaluate on the augmented test set with threshold
-augmented_test_accuracy_threshold, augmented_test_precision_threshold, augmented_test_recall_threshold, augmented_test_f1_threshold = model_utils.evaluate_with_threshold(model, test_ds_aug)
-print("Augmented Test Accuracy with Threshold:", augmented_test_accuracy_threshold)
-print("Augmented Test Precision with Threshold:", augmented_test_precision_threshold)
-print("Augmented Test Recall with Threshold:", augmented_test_recall_threshold)
-print("Augmented Test F1 Score with Threshold:", augmented_test_f1_threshold)
 
 # ---------------- Save Model ----------------
 # Paths to save model and weights
