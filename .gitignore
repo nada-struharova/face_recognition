@@ -1,6 +1,8 @@
 datasets/evaluate_local/
 datasets/lfw/
 datasets/celeb_a
+datasets/face_bank
+datasets/test_images
 .DS_Store
 *.pyc
 *.tmp
