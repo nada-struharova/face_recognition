@@ -4,10 +4,19 @@ import cv2
 import tensorflow as tf
 import joblib
 import argparse
-from sklearn.preprocessing import StandardScaler
 from retinaface import RetinaFace
-from src.utils import *
 import time
+
+# -------------- Face Detection ----------------
+# # Load Dlib's face detector
+# dlib_model_path = 'face_recognition/src/face_detection/mmod_human_face_detector.dat'
+# detector = dlib.cnn_face_detection_model_v1(dlib_model_path)
+
+# # Load MTCNN detector (better for images)
+# from mtcnn import MTCNN
+# detector = MTCNN()
+
+# # TODO: Load DNN detector model (best for real-time on videos/webcam feed)
 
 class Recognizer:
     def __init__(self, vgg16_model_path, fine_tuned_model_path, scaler_path):
@@ -35,7 +44,7 @@ class Recognizer:
 
         for face_id, face_data in faces.items():
             face_img, landmarks = preprocess_face(image, face_data)
-            face_features = fuse_regions(face_img, face_data['facial_area'], landmarks)
+            face_features = local_features.region_based.fuse_regions(face_img, face_data['facial_area'], landmarks)
             local_features.extend(face_features)
 
         return np.array(local_features)

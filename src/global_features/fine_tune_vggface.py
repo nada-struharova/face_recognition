@@ -1,8 +1,8 @@
 import tensorflow as tf
 import os
-import data_utils
-import model_utils
-import confusion_matrix as cm
+import src.dataset_utils as dataset_utils
+import src.model_utils as model_utils
+import src.confusion_matrix as cm
 
 # ---------------- Constants ----------------
 # Training Details
@@ -17,7 +17,7 @@ WEIGHTS_DIR = os.path.join(MODEL_DIR, 'weights')
 
 # ---------------- Model Training ----------------
 # Load CelebA dataset
-train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = data_utils.prepare_celeba_fr(BASE_IMG_DIR,
+train_ds, val_ds, test_ds_og, test_ds_aug, num_classes = dataset_utils.prepare_celeba_fr(BASE_IMG_DIR,
                                                                                       loss_func=LOSS_FUNC,
                                                                                       batch_size=BATCH_SIZE)
 
@@ -83,29 +83,32 @@ if os.path.exists(best_weights_path):
 else:
     print(f"Weights file not found: {best_weights_path}")
 
-# Evaluate on the original test set with threshold
-original_test_accuracy_threshold, original_test_precision_threshold, original_test_recall_threshold, original_test_f1_threshold = model_utils.evaluate_with_threshold(model, test_ds_og)
-print("Original Test Accuracy with Threshold:", original_test_accuracy_threshold)
-print("Original Test Precision with Threshold:", original_test_precision_threshold)
-print("Original Test Recall with Threshold:", original_test_recall_threshold)
-print("Original Test F1 Score with Threshold:", original_test_f1_threshold)
+# Evaluate the model on the original test set
+og_results = model.evaluate(test_ds_og)
+aug_results = model.evaluate(test_ds_aug)
 
-# Evaluate on the augmented test set with threshold
-augmented_test_accuracy_threshold, augmented_test_precision_threshold, augmented_test_recall_threshold, augmented_test_f1_threshold = model_utils.evaluate_with_threshold(model, test_ds_aug)
-print("Augmented Test Accuracy with Threshold:", augmented_test_accuracy_threshold)
-print("Augmented Test Precision with Threshold:", augmented_test_precision_threshold)
-print("Augmented Test Recall with Threshold:", augmented_test_recall_threshold)
-print("Augmented Test F1 Score with Threshold:", augmented_test_f1_threshold)
+# Unpack the results correctly
+original_test_loss = og_results[0]  # Loss value
+original_test_accuracy = og_results[1]  # Accuracy value
+original_test_precision = og_results[2]  # Precision value
+original_test_recall = og_results[3]  # Recall value
 
-# Evaluate on the original test set
-original_test_loss, original_test_accuracy = model.evaluate(test_ds_og)
+aug_test_loss = aug_results[0]
+aug_test_accuracy = aug_results[1]
+aug_test_precision = aug_results[2]
+aug_test_recall = aug_results[3]
 
-# Evaluate on the augmented test set
-augmented_test_loss, augmented_test_accuracy = model.evaluate(test_ds_aug)
+# Print the results
+print(f"Original Test Loss: {original_test_loss}")
+print(f"Original Test Accuracy: {original_test_accuracy}")
+print(f"Original Test Precision: {original_test_precision}")
+print(f"Original Test Recall: {original_test_recall}")
 
-print("Original Test Accuracy:", original_test_accuracy)
-print("Augmented Test Accuracy:", augmented_test_accuracy)
-
+# Print the results
+print(f"Augmented Test Loss: {aug_test_loss}")
+print(f"Augmented Test Accuracy: {aug_test_accuracy}")
+print(f"Augmented Test Precision: {aug_test_precision}")
+print(f"Augmented Test Recall: {aug_test_recall}")
 
 # ---------------- Save Model ----------------
 # # Paths to save model and weights

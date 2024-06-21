@@ -1,12 +1,12 @@
 import tensorflow as tf
 from keras import layers
-import data_utils
+import src.dataset_utils as dataset_utils
 
 def lookup_labels(label, image):
     return lookup(label), image
 
 # 2. Load Dataset
-(ds, train_ds, val_ds, test_ds) = data_utils.load_lfw_dataset()
+(ds, train_ds, val_ds, test_ds) = dataset_utils.load_lfw_dataset()
 
 # Create the StringLookup layer (convert string labels to int for loss function)
 lookup = layers.StringLookup(output_mode='int')
@@ -20,7 +20,7 @@ val_ds = val_ds.map(lookup_labels, num_parallel_calls=tf.data.AUTOTUNE)
 test_ds = test_ds.map(lookup_labels, num_parallel_calls=tf.data.AUTOTUNE)
 
 # 4. Load Model
-model = data_utils.load_resnet50_model(num_classes=num_classes)
+model = dataset_utils.load_resnet50_model(num_classes=num_classes)
 
 early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_accuracy',
                                                   patience=5,

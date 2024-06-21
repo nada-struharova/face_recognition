@@ -1,8 +1,8 @@
 import tensorflow as tf
 import os
-import data_utils
-import model_utils
-import confusion_matrix as cm
+import src.dataset_utils as dataset_utils
+import src.model_utils as model_utils
+import src.confusion_matrix as cm
 
 def triplet_loss(y_true, y_pred, alpha=0.2):
     anchor, positive, negative = y_pred
@@ -19,7 +19,7 @@ def preprocess_images(image_dir, output_dir):
     for img_name in os.listdir(image_dir):
         img_path = os.path.join(image_dir, img_name)
         save_path = os.path.join(output_dir, img_name)
-        data_utils.detect_and_crop_face(img_path, save_path)
+        dataset_utils.detect_and_crop_face(img_path, save_path)
 
 # ---------------- Constants ----------------
 # Training Details
@@ -28,25 +28,21 @@ LOSS_FUNC = 'triplet_loss'
 BATCH_SIZE = 32
 
 # Directories
-BASE_IMG_DIR = 'face_recognition/datasets/celeb_a/img_align_celeba'
-CROPPED_IMG_DIR = 'face_recognition/datasets/celeb_a/img_align_celeba_cropped'
+BASE_IMG_DIR = 'face_recognition/datasets/celeb_a/img_align_celeba_cropped'
 MODEL_DIR = 'face_recognition/src/global_features'
 WEIGHTS_DIR = os.path.join(MODEL_DIR, 'weights')
 
 model_name = f'{MODEL_TYPE}_{LOSS_FUNC}_{BATCH_SIZE}.keras'
 weights_name = f'{MODEL_TYPE}_{LOSS_FUNC}_{BATCH_SIZE}_weights.h5'
 
-# Preprocess images
-preprocess_images(BASE_IMG_DIR, CROPPED_IMG_DIR)
-
 # ---------------- Load Data ----------------
 # Generate Triplets
-train_triplets, val_triplets, test_triplets = data_utils.generate_triplets_from_dataset(BASE_IMG_DIR)
+train_triplets, val_triplets, test_triplets = dataset_utils.generate_triplets_from_dataset(BASE_IMG_DIR)
 
 # Prepare Datasets
-train_ds = data_utils.prepare_triplet_dataset(train_triplets, BATCH_SIZE)
-val_ds = data_utils.prepare_triplet_dataset(val_triplets, BATCH_SIZE)
-test_ds = data_utils.prepare_triplet_dataset(test_triplets, BATCH_SIZE)
+train_ds = dataset_utils.prepare_triplet_dataset(train_triplets, BATCH_SIZE)
+val_ds = dataset_utils.prepare_triplet_dataset(val_triplets, BATCH_SIZE)
+test_ds = dataset_utils.prepare_triplet_dataset(test_triplets, BATCH_SIZE)
 
 # ---------------- Create and Train Model ----------------
 # Load specific model
@@ -82,11 +78,13 @@ reduce_lr = tf.kers.callbacks.ReduceLROnPlateau(monitor='val_loss',
                                                 patience=3,
                                                 min_lr=1e-7)
 
+metrics_callback = cm.TripletMetricsCallback(val_ds)
+
 # Training
 history = model.fit(train_ds,
                     epochs=75,
                     validation_data=val_ds,
-                    callbacks=[early_stopping, reduce_lr, checkpoint])
+                    callbacks=[metrics_callback, early_stopping, reduce_lr, checkpoint])
 
 # Load Best Weights
 best_weights = min(history.history['val_loss'])

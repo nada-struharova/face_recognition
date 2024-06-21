@@ -1,140 +1,58 @@
 import tensorflow as tf
 import shutil
 import os
-import cv2
+import uuid
 import numpy as np
 import pandas as pd
-import random
 import augmentation_layer
 from sklearn.model_selection import train_test_split
-from mtcnn import MTCNN
 
-detector = MTCNN()
+# import tensorflow_datasets as tfds
+# import cv2
+# import lfw_augmentation
 
-# Define a function to detect and crop faces using MTCNN face detector
-def detect_and_crop_face(image_path, save_path):
-    img = cv2.imread(image_path)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-    # Detect faces in the image
-    detections = detector.detect_faces(img_rgb, )
-
-    if detections:
-        # Assume the largest face is the main face
-        largest_face = max(detections, key=lambda det: det['box'][2] * det['box'][3])
-        x, y, w, h = largest_face['box']
-        cropped_img = img[y:y+h, x:x+w]
-        cv2.imwrite(save_path, cropped_img)
-    else:
-        # If no face is detected, save the original image
-        cv2.imwrite(save_path, img)
-
-# Prepare Triplet Dataset for TensorFlow
-def prepare_triplet_dataset(triplets, batch_size, shuffle=True):
-    def load_image(img_path):
-        img = tf.io.read_file(img_path)
-        img = tf.image.decode_jpeg(img, channels=3)
-        img = tf.image.resize(img, (224, 224))  # assuming VGG16 input size
-        img = tf.cast(img, tf.float32) / 255.0
-        return img
-
-    anchor_images = tf.constant([triplet[0] for triplet in triplets])
-    positive_images = tf.constant([triplet[1] for triplet in triplets])
-    negative_images = tf.constant([triplet[2] for triplet in triplets])
-
-    dataset = tf.data.Dataset.from_tensor_slices((anchor_images, positive_images, negative_images))
-    dataset = dataset.map(lambda anchor, pos, neg: (load_image(anchor), load_image(pos), load_image(neg)))
-
-    if shuffle:
-        dataset = dataset.shuffle(buffer_size=len(triplets))
-
-    dataset = dataset.batch(batch_size)
-    return dataset
-
-def generate_triplets_from_dataset(image_dir,
-                                   identity_file='face_recognition/datasets/celeb_a/identity_CelebA.txt',
-                                   train_ratio=0.8,
-                                   val_ratio=0.1,
-                                   test_ratio=0.1):
-    """
-    Generate triplets from the CelebA dataset for training with triplet loss.
+# def load_dataset():
+#     (ds, train_ds, val_ds, test_ds), metadata = tfds.load(
+#         'lfw',
+#         data_dir='face_recognition/datasets/lfw',
+#         split=['train', 'train[:80%]', 'train[80%:90%]', 'train[90%:]'],
+#         as_supervised=True,
+#         with_info=True,
+#         batch_size=32
+#     )
     
-    Args:
-    - image_dir: Directory containing all the image files.
-    - identity_file: Path to the identity text file where each JPEG is assigned an identity.
-    - train_ratio: Ratio of the dataset to use for training.
-    - val_ratio: Ratio of the dataset to use for validation.
-    - test_ratio: Ratio of the dataset to use for testing.
-    
-    Returns:
-    - train_triplets: List of triplets for training.
-    - val_triplets: List of triplets for validation.
-    - test_triplets: List of triplets for testing.
-    """
+#     train_ds = train_ds.map(
+#         lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
+#     val_ds = val_ds.map(
+#         lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
+#     test_ds = test_ds.map(
+#         lfw_augmentation.add_occlusion, num_parallel_calls=tf.data.AUTOTUNE)
 
-    # Load identity file, build mappings
-    with open(identity_file, 'r') as file:
-        lines = file.readlines()
-    id_mapping = {line.split()[0]: line.split()[1] for line in lines}
-    
-    # Get list of all image paths and shuffle
-    image_paths = list(id_mapping.keys())
-    random.shuffle(image_paths)
-
-    # Create a DataFrame for easier manipulation
-    df = pd.DataFrame(list(id_mapping.items()), columns=['filename', 'identity'])
-    
-    # Split dataset into training, validation, and test sets
-    train_df, temp_df = train_test_split(df, train_size=train_ratio, stratify=df['identity'], random_state=42)
-    val_df, test_df = train_test_split(temp_df, train_size=val_ratio/(val_ratio + test_ratio), stratify=temp_df['identity'], random_state=42)
-    
-    def create_triplets(split_df):
-        triplets = []
-        grouped = split_df.groupby('identity')
-        
-        for identity, group in grouped:
-            images = group['filename'].tolist()
-            
-            if len(images) < 2:
-                continue  # Skip if there are not enough images to form a triplet
-            
-            for _ in range(len(images)):
-                anchor_image = random.choice(images)
-                positive_image = random.choice([img for img in images if img != anchor_image])
-                
-                negative_identity = identity
-                while negative_identity == identity:
-                    negative_image = random.choice(image_paths)
-                    negative_identity = id_mapping[negative_image]
-                
-                triplets.append((os.path.join(image_dir, anchor_image),
-                                 os.path.join(image_dir, positive_image),
-                                 os.path.join(image_dir, negative_image)))
-        
-        return triplets
-    
-    # Generate triplets for each split
-    train_triplets = create_triplets(train_df)
-    val_triplets = create_triplets(val_df)
-    test_triplets = create_triplets(test_df)
-    
-    return train_triplets, val_triplets, test_triplets
-
-def load_and_preprocess_image(file_path, label):
+def load_and_preprocess_image(file_path, label, bbox_info=None):
     ## Preprocess CelebA for VGG16
     image = tf.io.read_file(file_path)
     image = tf.image.decode_jpeg(image, channels=3)
+
+    if bbox_info is not None:
+        # Get bounding box info
+        bbox = bbox_info[file_path.numpy().decode("utf-8")]
+        x, y, width, height = bbox
+
+        # Crop image based on bounding box
+        image = tf.image.crop_to_bounding_box(image, y, x, height, width)
+        
     image = tf.image.resize(image, (224, 224))
     image = tf.keras.applications.vgg16.preprocess_input(image)
-    label = tf.cast(label, tf.int32)
+    # label = tf.cast(label, tf.int32)
     return image, label
 
 # Prepare CelebA Dataset for Training
 def prepare_celeba_fr(
     base_img_dir,
     identity_file='face_recognition/datasets/celeb_a/identity_CelebA.txt',
-    base_split_dir='face_recognition/datasets/celeb_a/split_fr_cropped',
-    loss_func='categorical_crossentropy',
+    bbox_file='face_recognition/datasets/celeb_a/list_bbox_celeba.txt',
+    base_split_dir='face_recognition/datasets/celeb_a/split_fr_bbox',
+    loss_func='sparse_categorical_crossentropy',
     batch_size=32,
     train_ratio=0.8,
     val_ratio=0.1,
@@ -144,11 +62,16 @@ def prepare_celeba_fr(
     identity_df = pd.read_csv(identity_file, sep=' ', header=None, names=['filename', 'identity'])
     identity_df['identity'] = identity_df['identity'].astype(int)
 
+    # Load bounding box file
+    bbox_df = pd.read_csv(bbox_file, sep='\s+', skiprows=1, names=['filename', 'x', 'y', 'width', 'height'])
+    bbox_info = {row['filename']: [row['x'], row['y'], row['width'], row['height']] for _, row in bbox_df.iterrows()}
+
     # Sort identities to ensure consistent mapping
     unique_ids = sorted(identity_df['identity'].unique())
 
     # Create a label mapping dictionary (identity -> integer index)
     id_to_label = {identity: (label + 1) for label, identity in enumerate(unique_ids)}  # Labels start from 1
+
     # Add a new column for the mapped integer labels
     identity_df['label'] = identity_df['identity'].map(id_to_label)
 
@@ -200,26 +123,17 @@ def prepare_celeba_fr(
 
             # Move images to their respective directories
             for img in train_images:
-                src_path = os.path.join(base_img_dir, img)
-                dest_path = os.path.join(base_split_dir, 'train', str(identity), img)
-                detect_and_crop_face(src_path, dest_path)
-                # shutil.copy(, os.path.join(base_split_dir, 'train', str(identity), img))
-
+                shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'train', str(identity), img))
+            
             for img in val_images:
-                src_path = os.path.join(base_img_dir, img)
-                dest_path = os.path.join(base_split_dir, 'val', str(identity), img)
-                detect_and_crop_face(src_path, dest_path)
-                # shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'val', str(identity), img))
+                shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'val', str(identity), img))
             
             for img in test_images:
-                src_path = os.path.join(base_img_dir, img)
-                dest_path = os.path.join(base_split_dir, 'test', str(identity), img)
-                detect_and_crop_face(src_path, dest_path)
-                # shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'test', str(identity), img))
+                shutil.copy(os.path.join(base_img_dir, img), os.path.join(base_split_dir, 'test', str(identity), img))
 
     # Instantiate synthetic augmentation layer
     synthetic_augmentation = augmentation_layer.RandomOcclusionLayer(
-        augmentation_prob=0.3,  # with 40% chance of synthetic occlusion
+        augmentation_prob=0.6,  # with 40% chance of synthetic occlusion
         sunglasses_path='face_recognition/datasets/augment/black_sunglasses.png',
         hat_path='face_recognition/datasets/augment/hat.png',
         mask_path='face_recognition/datasets/augment/mask.png'
@@ -230,16 +144,34 @@ def prepare_celeba_fr(
         image = synthetic_augmentation(image, training=True)
         return image, label
     
+    # def augment_image_train(image, label):
+    #     image = tf.identity(image)  # Create a copy of the image
+    #     # Apply custom augmentation layer
+    #     image = synthetic_augmentation(image, training=True)
+    #     return image, label
+    
+    # # Function to save augmented images
+    # def save_augmented_image(image, label):
+    #     filename = str(uuid.uuid4()) + ".jpg"
+    #     base_split_dir = 'face_recognition/datasets/celeb_a/img_align_celeba'  # Update this to your correct path
+
+    #     def _save_img(img, lbl):
+    #         filepath = os.path.join(base_split_dir, 'train', str(lbl.numpy()), filename)
+    #         tf.keras.utils.save_img(filepath, img.numpy())  # Convert to NumPy before saving
+    #         return img, lbl
+
+    #     return tf.py_function(_save_img, inp=[image, label], Tout=[tf.float32, tf.int32])
+
     # Uses mapping and SCCE
     def get_image_paths_and_labels(partition):
         image_paths = []
         labels = []
         partition_dir = os.path.join(base_split_dir, partition)
-        for identity in unique_ids:
+        for identity in unique_ids:  # Iterate over unique identities
             identity_dir = os.path.join(partition_dir, str(identity))
             for img_name in os.listdir(identity_dir):
                 image_paths.append(os.path.join(identity_dir, img_name))
-                labels.append(id_to_label[identity])  # or use 'labels.append(identity)'
+                labels.append(id_to_label[identity])  # Use the integer label from the mapping
         return image_paths, labels
 
     train_image_paths, train_labels = get_image_paths_and_labels('train')
@@ -250,6 +182,7 @@ def prepare_celeba_fr(
     assert np.array(train_labels).shape == (len(train_labels),), "Train labels shape mismatch"
     assert np.array(val_labels).shape == (len(val_labels),), "Validation labels shape mismatch"
     assert np.array(test_labels).shape == (len(test_labels),), "Test labels shape mismatch"
+
     # Check label range
     assert min(train_labels) >= 1 and max(train_labels) <= num_ids, "Train labels out of range"
     assert min(val_labels) >= 1 and max(val_labels) <= num_ids, "Validation labels out of range"
@@ -265,6 +198,8 @@ def prepare_celeba_fr(
         train_labels = tf.one_hot(train_labels, num_ids)
         val_labels = tf.one_hot(val_labels, num_ids)
         test_labels = tf.one_hot(test_labels, num_ids)
+
+        print("train label: ", train_labels)
     
     print(f"Train labels shape (sparse): {train_labels.shape}")
     print(f"Validation labels shape (sparse): {val_labels.shape}")
@@ -272,20 +207,20 @@ def prepare_celeba_fr(
 
     datasets = {
             'train': tf.data.Dataset.from_tensor_slices((tf.constant(train_image_paths), train_labels))
-                                    .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
-                                    .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
-                                    # .map(save_augmented_image, num_parallel_calls=tf.data.AUTOTUNE)
-                                    .shuffle(buffer_size=10000)
+                                    .map(lambda x, y: load_and_preprocess_image(x, y, bbox_info), num_parallel_calls=tf.data.AUTOTUNE)
+                                    # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                    # .map(save_augmented_image, num_parallel_calls=tf.data.AUTOTUNE) # Add this line
+                                    # .shuffle(buffer_size=len(train_image_paths))
                                     .batch(batch_size),
             'val': tf.data.Dataset.from_tensor_slices((tf.constant(val_image_paths), val_labels))
-                                    .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
-                                    # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
-                                    .batch(batch_size),
+                                .map(lambda x, y: load_and_preprocess_image(x, y, bbox_info), num_parallel_calls=tf.data.AUTOTUNE)
+                                # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                .batch(batch_size),
             'test_original': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
-                                        .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                        .map(lambda x, y: load_and_preprocess_image(x, y, bbox_info), num_parallel_calls=tf.data.AUTOTUNE)
                                         .batch(batch_size),
             'test_augmented': tf.data.Dataset.from_tensor_slices((tf.constant(test_image_paths), test_labels))
-                                        .map(load_and_preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
+                                        .map(lambda x, y: load_and_preprocess_image(x, y, bbox_info), num_parallel_calls=tf.data.AUTOTUNE)
                                         # .map(augment_image, num_parallel_calls=tf.data.AUTOTUNE)
                                         .batch(batch_size)
         }
@@ -317,9 +252,8 @@ def prepare_celeba_extract(
             partition_dir = os.path.join(base_split_dir, partition)
             for identity_dir in os.listdir(partition_dir):
                 if identity_dir == '.DS_Store':
-                    continue  # Skip .DS_Store files created by MacOS
+                    continue  # Skip .DS_Store files
                 identity_path = os.path.join(partition_dir, identity_dir)
-
                 # Check if the directory is empty
                 if not os.listdir(identity_path):
                     # print(f"Removing empty identity directory: {identity_path}")
@@ -405,3 +339,15 @@ def prepare_celeba_extract(
     }
 
     return datasets['train'], datasets['val'], datasets['test_original'], datasets['test_augmented'], num_ids
+
+# Original
+# def get_image_paths_and_labels(partition):
+#     image_paths = []
+#     labels = []
+#     partition_dir = os.path.join(base_split_dir, partition)
+#     for identity in unique_ids:
+#         identity_dir = os.path.join(partition_dir, str(identity))
+#         for img_name in os.listdir(identity_dir):
+#             image_paths.append(os.path.join(identity_dir, img_name))
+#             labels.append(identity)
+#     return image_paths, labels
